@@ -82,6 +82,7 @@
   td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   tr.group td { font-weight: 700; color: var(--blue7); background: #f8fafc; }
+  tr.subtotal td { font-weight: 600; color: #475569; background: #fafcff; border-top: 1px solid var(--line2); }
   tfoot td { font-weight: 700; color: var(--blue7); background: #f1f5f9; }
   tfoot tr.total td { color: #1e3a8a; background: #eff6ff; }
   .verify { margin-left: 5px; font-size: 11px; color: var(--orange); }
@@ -231,7 +232,7 @@
         <label class="fld">Labour rate ($/hr)<input type="number" id="labourRate" placeholder="$/hr" /></label>
 
         <details open>
-          <summary>Fixing prices ($ each)</summary>
+          <summary>APLM Fixings prices ($ each)</summary>
           <div id="fixingPrices" style="margin-top:4px"></div>
         </details>
 
@@ -302,11 +303,13 @@
 "use strict";
 /* ---------- Constants (ported from src/lib/eyebrow) ---------- */
 const DEFAULT_CONFIG = { extAdd: 60, finOff: -10, brSpaceW: 800, brSpaceH: 900, endOffset: 117, holePitch: 100 };
-const DEFAULT_SCREW_CFG = { s25: 4, s50: 2, s32: 2, s19: 2, cap: 2, c72: 2, c79: 2, ext: 0, inf: 0, fix: 0 };
+const DEFAULT_SCREW_CFG = { s25: 4, s50: 2, s32: 2, s19: 2, cap: 2, c72: 2, c79: 2 };
 const STANDARD_PRICES = { "20965": 36.65 / 5, "01072": 289 / 5, "01079": 226.95 / 5, "01070": 267.6 / 5, "24061": 172.05 / 5, "01069": 48.15 / 5 };
 const STANDARD_PART_PRICES = { "40×20 channel": 9.05, "Fixing plate": 9.27, "75×25×3 angle bracket": 14.07, "Corner gusset": 18.07 };
 const FIXING_PART_NAMES = [];
-const SCREW_TYPES = ["8g × 25 pan", "8g × 50 2-pan", "8g × 32 pan", "8g × 19 truss", "Corner screw", "Screw"];
+const SCREW_TYPES = ["8g × 25 pan", "8g × 50 2-pan", "8g × 32 pan", "8g × 19 truss", "Corner screw"];
+/* every screw type defaults to $0.10 each; users can still change any of them */
+const DEFAULT_SCREW_PRICES = SCREW_TYPES.reduce((o, t) => { o[t] = 0.1; return o; }, {});
 const STOCK_LENGTH = 5000, KERF = 5;
 const SEC_CUTTING_PER_PIECE = 120, SEC_MACHINING_PER_PIECE = 240;
 const EXTRUSION_NAMES = { "20965": "Frame extender", "01072": "Box fin (150 connectable)", "01079": "Box fin cap (100)", "01070": "Box fin cap (150)", "24061": "RTH 44mm frame", "01069": "Infill cover" };
@@ -321,7 +324,7 @@ const BOX_FIN_PROFILE_NAMES = { "01072": "150 connectable", "01079": "100 cap", 
 const SCREW_FIELDS = [
   ["s25", "8g×25 pan / bracket"], ["s50", "8g×50 2-pan / bracket"], ["s32", "8g×32 pan / bracket"],
   ["s19", "8g×19 truss / bracket"], ["cap", "8g×19 truss / cap (×corner)"], ["c72", "01072 / corner"],
-  ["c79", "01079 / corner"], ["ext", "Box fin→extender / window"], ["inf", "Infill / window"], ["fix", "Fixing/spacer / bracket"],
+  ["c79", "01079 / corner"],
 ];
 
 /* ---------- Helpers ---------- */
@@ -385,12 +388,12 @@ function compute(W, H, depth, cfg, sc) {
     ...boxFinRows,
     { part: "RTH 44mm frame", code: "24061", len: W, qty: 2 },
     { part: "RTH 44mm frame", code: "24061", len: H, qty: 2 },
-    { group: "Fixings" },
+    { group: "APLM Fixings" },
     { part: "75×25×3 angle bracket", code: "01233", len: 120, qty: brackets, fixedPrice: true },
     { part: "40×20 channel", code: "01249", len: 120, qty: brackets, fixedPrice: true },
     { part: "Fixing plate", code: "01069", len: 120, qty: brackets, fixedPrice: true },
     { part: "Corner gusset", code: "01072", len: 0, qty: 4, fixedPrice: true },
-    { group: "Infill covers (01069) - verify lengths" },
+    { group: "Infill covers (01069)" },
     { part: "Cover - LH/RH trapezoid (edge)", code: "01069", len: trapWidth, qty: 2, note: true },
     sideCoverRow,
     { part: "Cover - between brackets (mid)", code: "01069", len: midCover, qty: midCount, note: true },
@@ -405,9 +408,6 @@ function compute(W, H, depth, cfg, sc) {
     ["8g × 19 truss", "Box fin cap", "corner", sc.cap],
     ["Corner screw", "Box fin 01072 corners", "corner", sc.c72],
     ["Corner screw", "01079 corners", "corner", sc.c79],
-    ["Screw", "Box fin → frame extender", "window", sc.ext],
-    ["Screw", "Infill panels", "window", sc.inf],
-    ["Screw", "Fixing plate", "bracket", sc.fix],
   ];
   const screws = defs
     .map(([type, area, basis, per]) => ({ type, area, basis, per, qty: per * mult[basis] }))
@@ -438,23 +438,32 @@ function screwLineCost(s, ctx) {
   const p = ctx.screwPrices[s.type];
   return p != null && Number.isFinite(p) ? p * s.qty : null;
 }
+/* Extrusions already include freight; APLM Fixings need freight added at this rate. */
+const FIXING_FREIGHT_PCT = 3;
+const FIXING_FREIGHT_RATE = FIXING_FREIGHT_PCT / 100;
 function computeCosts(model, ctx) {
-  let ext = 0, extAny = false, pieces = 0;
+  let ext = 0, extAny = false, pieces = 0, fix = 0, fixAny = false;
   for (const r of model.rows) {
     if (isGroup(r)) continue;
     if (!r.fixedPrice) pieces += r.qty;
     const c = lineCost(r, ctx);
-    if (c != null) { ext += c; extAny = true; }
+    if (c != null) {
+      ext += c; extAny = true;
+      if (r.fixedPrice) { fix += c; fixAny = true; }   // fixedPrice rows = the APLM Fixings group
+    }
   }
   let scr = 0, scrAny = false;
   for (const s of model.screws) { const c = screwLineCost(s, ctx); if (c != null) { scr += c; scrAny = true; } }
+  const fixingFreight = fixAny ? fix * FIXING_FREIGHT_RATE : null;
   const labourSeconds = pieces * (SEC_CUTTING_PER_PIECE + SEC_MACHINING_PER_PIECE);
   const labourCost = (labourSeconds / 3600) * (ctx.labourRate || 0);
   return {
     labourCost,
     extrusionCost: extAny ? ext : null,
+    fixingCost: fixAny ? fix : null,
+    fixingFreight,
     screwCost: scrAny ? scr : null,
-    grandTotal: extAny || scrAny ? ext + scr + labourCost : null,
+    grandTotal: extAny || scrAny ? ext + scr + (fixingFreight || 0) + labourCost : null,
   };
 }
 function labourBreakdown(model, rate) {
@@ -646,6 +655,7 @@ function buildSingleCsv(model, costs, ctx) {
     lines.push([r.part, r.code, fmt(r.len), r.qty, fmt(r.len * r.qty), u != null ? u.toFixed(2) : "", c != null ? c.toFixed(2) : ""]);
   }
   if (costs.extrusionCost != null) lines.push(["Extrusion cost", "", "", "", "", "", costs.extrusionCost.toFixed(2)]);
+  if (costs.fixingFreight != null) lines.push([`APLM Fixings freight (${FIXING_FREIGHT_PCT}%)`, "", "", "", "", "", costs.fixingFreight.toFixed(2)]);
   if (model.screws.length) {
     lines.push([]);
     lines.push(["Fasteners", "Screw type", "", "Qty", "", "$ each", "Cost $"]);
@@ -667,7 +677,7 @@ const state = {
   W: 600, H: 600, depth: 250,
   config: { ...DEFAULT_CONFIG },
   screwCfg: { ...DEFAULT_SCREW_CFG },
-  screwPrices: {}, partPrices: { ...STANDARD_PART_PRICES }, labourRate: "",
+  screwPrices: { ...DEFAULT_SCREW_PRICES }, partPrices: { ...STANDARD_PART_PRICES }, labourRate: "",
 };
 function load() {
   try {
@@ -678,7 +688,7 @@ function load() {
       W: nn(s.W, 600), H: nn(s.H, 600), depth: nn(s.depth, 250),
       config: { ...DEFAULT_CONFIG, ...(s.config || {}) },
       screwCfg: { ...DEFAULT_SCREW_CFG, ...(s.screwCfg || {}) },
-      screwPrices: s.screwPrices || {}, partPrices: { ...(s.partPrices || {}), ...STANDARD_PART_PRICES },
+      screwPrices: { ...DEFAULT_SCREW_PRICES, ...(s.screwPrices || {}) }, partPrices: { ...(s.partPrices || {}), ...STANDARD_PART_PRICES },
       labourRate: nn(s.labourRate, ""),
     });
   } catch (e) { /* ignore */ }
@@ -801,10 +811,21 @@ function render() {
 function renderCutList(model, costs, ctx) {
   let anyMissing = false;
   let body = "";
+  let curGroup = null, groupSum = 0, groupPriced = false;
+  const flushSubtotal = () => {
+    if (curGroup && groupPriced)
+      body += `<tr class="subtotal"><td colspan="6" class="num">${esc(curGroup)} subtotal</td><td class="num">${money(groupSum)}</td></tr>`;
+    groupSum = 0; groupPriced = false;
+  };
   for (const r of model.rows) {
-    if (isGroup(r)) { body += `<tr class="group"><td colspan="7">${esc(r.group)}</td></tr>`; continue; }
+    if (isGroup(r)) {
+      flushSubtotal();
+      curGroup = r.group;
+      body += `<tr class="group"><td colspan="7">${esc(r.group)}</td></tr>`;
+      continue;
+    }
     const u = unitPrice(r, ctx), c = lineCost(r, ctx);
-    if (c == null) anyMissing = true;
+    if (c == null) anyMissing = true; else { groupSum += c; groupPriced = true; }
     const lenCell = r.fixedPrice ? "-" : fmt(r.len);
     const totCell = r.fixedPrice ? "-" : fmt(r.len * r.qty);
     const uCell = u != null
@@ -820,10 +841,13 @@ function renderCutList(model, costs, ctx) {
       <td class="num">${c != null ? money(c) : "-"}</td>
     </tr>`;
   }
+  flushSubtotal();
+  const freightRow = costs.fixingFreight != null
+    ? `<tr><td class="num" colspan="6">APLM Fixings freight (${FIXING_FREIGHT_PCT}%)</td><td class="num">${money(costs.fixingFreight)}</td></tr>` : "";
   const sub = costs.extrusionCost != null
-    ? `<tfoot><tr><td class="num" colspan="6">Estimated extrusion cost</td><td class="num">${money(costs.extrusionCost)}</td></tr></tfoot>` : "";
-  const cap = costs.extrusionCost != null
-    ? `<p class="caption">Extrusion cost only - labour costed separately; excludes freight${anyMissing ? ", and items with no price (shown as -)." : "."}</p>` : "";
+    ? `<tfoot><tr><td class="num" colspan="6">Estimated extrusion cost</td><td class="num">${money(costs.extrusionCost)}</td></tr>${freightRow}</tfoot>` : "";
+  const cap = (costs.extrusionCost != null && anyMissing)
+    ? `<p class="caption">Items with no price are shown as -.</p>` : "";
 
   const m = model;
   const summary = `<p class="summary">Window <b>${fmt(m.W)} × ${fmt(m.H)}mm</b> · Box fin <b>${fmt(m.finW)} × ${fmt(m.finH)}mm</b> · Brackets <b>${m.brW}</b> top/bottom · <b>${m.brH}</b> each side · Total brackets <b>${m.brackets}</b>.</p>`;
@@ -864,7 +888,7 @@ function renderFasteners(model, costs, ctx) {
   if (costs.screwCost != null)
     foot += `<tr><td class="num" colspan="4">Fastener cost</td><td class="num">${money(costs.screwCost)}</td></tr>`;
   if (costs.grandTotal != null)
-    foot += `<tr class="total"><td class="num" colspan="4">Total (extrusion + fasteners + labour)</td><td class="num">${money(costs.grandTotal)}</td></tr>`;
+    foot += `<tr class="total"><td class="num" colspan="4">Total (extrusion + fasteners + freight + labour)</td><td class="num">${money(costs.grandTotal)}</td></tr>`;
 
   document.getElementById("fasteners").innerHTML =
     `<table><thead><tr>
