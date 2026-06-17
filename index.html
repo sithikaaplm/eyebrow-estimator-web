@@ -1005,8 +1005,8 @@ function renderFasteners(model, costs, ctx) {
 /* 45° accent line for an angled (mitred) end, as a thin diagonal via linear-gradient.
    "/" slants bottom-left → top-right; "\" slants top-left → bottom-right. */
 const SLASH = {
-  "/": "linear-gradient(135deg, transparent calc(50% - 0.75px), #b45309 calc(50% - 0.75px), #b45309 calc(50% + 0.75px), transparent calc(50% + 0.75px))",
-  "\\": "linear-gradient(45deg, transparent calc(50% - 0.75px), #b45309 calc(50% - 0.75px), #b45309 calc(50% + 0.75px), transparent calc(50% + 0.75px))",
+  "/": "linear-gradient(135deg, transparent calc(50% - 2px), #b45309 calc(50% - 2px), #b45309 calc(50% + 2px), transparent calc(50% + 2px))",
+  "\\": "linear-gradient(45deg, transparent calc(50% - 2px), #b45309 calc(50% - 2px), #b45309 calc(50% + 2px), transparent calc(50% + 2px))",
 };
 function optimiserHtml(rows) {
   const groups = nestExtrusions(rows);
