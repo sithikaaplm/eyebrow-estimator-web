@@ -499,10 +499,10 @@ function labourBreakdown(model, rate) {
 }
 
 /* ---------- Nesting (nesting.ts) ---------- */
-/* End cuts for a piece, by row type. Mitred pieces alternate by index so paired
-   members mirror each other (top "/ \" <-> bottom "\ /"); trapezoids alternate LH/RH. */
+/* End cuts for a piece, by row type. Mitred pieces are cut "/ \" (both ends 45°);
+   trapezoid covers alternate LH/RH by index. */
 function endsFor(r, i) {
-  if (r.miter) return i % 2 === 0 ? { left: "/", right: "\\" } : { left: "\\", right: "/" };
+  if (r.miter) return { left: "/", right: "\\" };
   if (r.trapezoid) return i % 2 === 0 ? { left: "\\", right: "" } : { left: "", right: "/" };
   return { left: "", right: "" };
 }
