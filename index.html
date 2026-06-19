@@ -448,12 +448,20 @@ function effectivePrice(code, ctx) {
   const m = ctx.manualPrices[code];
   return m != null && Number.isFinite(m) ? m : null;
 }
+/* Freight on the APLM Fixings, absorbed into each fixing's unit price (not shown
+   to customers as a separate line). Extrusions already include freight in their $/m. */
+const FIXING_FREIGHT_RATE = 0.03;
+const FIXING_FREIGHT_MULT = 1 + FIXING_FREIGHT_RATE;
+function fixingUnitPrice(part, ctx) {
+  const p = ctx.partPrices[part];
+  return p != null && Number.isFinite(p) ? p * FIXING_FREIGHT_MULT : null;
+}
 function unitPrice(r, ctx) {
-  if (r.fixedPrice) { const p = ctx.partPrices[r.part]; return p != null && Number.isFinite(p) ? p : null; }
+  if (r.fixedPrice) return fixingUnitPrice(r.part, ctx);
   return effectivePrice(r.code, ctx);
 }
 function lineCost(r, ctx) {
-  if (r.fixedPrice) { const p = ctx.partPrices[r.part]; return p != null && Number.isFinite(p) ? p * r.qty : null; }
+  if (r.fixedPrice) { const p = fixingUnitPrice(r.part, ctx); return p != null ? p * r.qty : null; }
   const m = effectivePrice(r.code, ctx);
   if (m == null) return null;
   return (m * (r.len * r.qty)) / 1000;
@@ -462,9 +470,6 @@ function screwLineCost(s, ctx) {
   const p = ctx.screwPrices[s.type];
   return p != null && Number.isFinite(p) ? p * s.qty : null;
 }
-/* Extrusions already include freight; APLM Fixings need freight added at this rate. */
-const FIXING_FREIGHT_PCT = 3;
-const FIXING_FREIGHT_RATE = FIXING_FREIGHT_PCT / 100;
 function computeCosts(model, ctx) {
   let ext = 0, extAny = false, pieces = 0, fix = 0, fixAny = false;
   for (const r of model.rows) {
@@ -479,16 +484,14 @@ function computeCosts(model, ctx) {
   }
   let scr = 0, scrAny = false;
   for (const s of model.screws) { const c = screwLineCost(s, ctx); if (c != null) { scr += c; scrAny = true; } }
-  const fixingFreight = fixAny ? fix * FIXING_FREIGHT_RATE : null;
   const labourSeconds = pieces * (SEC_CUTTING_PER_PIECE + SEC_MACHINING_PER_PIECE);
   const labourCost = (labourSeconds / 3600) * (ctx.labourRate || 0);
   return {
     labourCost,
     extrusionCost: extAny ? ext : null,
     fixingCost: fixAny ? fix : null,
-    fixingFreight,
     screwCost: scrAny ? scr : null,
-    grandTotal: extAny || scrAny ? ext + scr + (fixingFreight || 0) + labourCost : null,
+    grandTotal: extAny || scrAny ? ext + scr + labourCost : null,
   };
 }
 function labourBreakdown(model, rate) {
@@ -755,7 +758,6 @@ function buildSingleCsv(model, costs, ctx) {
     lines.push([r.part, r.code, fmt(r.len), r.qty, fmt(r.len * r.qty), u != null ? u.toFixed(2) : "", r.external ? "from V6" : (c != null ? c.toFixed(2) : "")]);
   }
   if (costs.extrusionCost != null) lines.push(["Extrusion cost", "", "", "", "", "", costs.extrusionCost.toFixed(2)]);
-  if (costs.fixingFreight != null) lines.push([`APLM Fixings freight (${FIXING_FREIGHT_PCT}%)`, "", "", "", "", "", costs.fixingFreight.toFixed(2)]);
   if (model.screws.length) {
     lines.push([]);
     lines.push(["Fasteners", "Screw type", "", "Qty", "", "$ each", "Cost $"]);
@@ -949,10 +951,8 @@ function renderCutList(model, costs, ctx) {
     </tr>`;
   }
   flushSubtotal();
-  const freightRow = costs.fixingFreight != null
-    ? `<tr><td class="num" colspan="6">APLM Fixings freight (${FIXING_FREIGHT_PCT}%)</td><td class="num">${money(costs.fixingFreight)}</td></tr>` : "";
   const sub = costs.extrusionCost != null
-    ? `<tfoot><tr><td class="num" colspan="6">Estimated extrusion cost</td><td class="num">${money(costs.extrusionCost)}</td></tr>${freightRow}</tfoot>` : "";
+    ? `<tfoot><tr><td class="num" colspan="6">Estimated extrusion cost</td><td class="num">${money(costs.extrusionCost)}</td></tr></tfoot>` : "";
   const cap = (costs.extrusionCost != null && anyMissing)
     ? `<p class="caption">Items with no price are shown as -.</p>` : "";
 
@@ -995,7 +995,7 @@ function renderFasteners(model, costs, ctx) {
   if (costs.screwCost != null)
     foot += `<tr><td class="num" colspan="4">Fastener cost</td><td class="num">${money(costs.screwCost)}</td></tr>`;
   if (costs.grandTotal != null)
-    foot += `<tr class="total"><td class="num" colspan="4">Total (extrusion + fasteners + freight + labour)</td><td class="num">${money(costs.grandTotal)}</td></tr>`;
+    foot += `<tr class="total"><td class="num" colspan="4">Total (extrusion + fasteners + labour)</td><td class="num">${money(costs.grandTotal)}</td></tr>`;
 
   document.getElementById("fasteners").innerHTML =
     `<table><thead><tr>
@@ -1158,7 +1158,7 @@ function buildCombinedCsv(results, ctx) {
   let total = 0;
   for (const a of combinedOrder(results)) {
     let u = null, cost = null;
-    if (a.fixedPrice) { const p = ctx.partPrices[a.part]; if (p != null && Number.isFinite(p)) { u = p; cost = p * a.qty; } }
+    if (a.fixedPrice) { const p = fixingUnitPrice(a.part, ctx); if (p != null) { u = p; cost = p * a.qty; } }
     else { const ep = effectivePrice(a.code, ctx); if (ep != null) { u = ep; cost = (ep * a.lenMm) / 1000; } }
     if (cost != null) total += cost;
     lines.push([a.part, a.code, a.qty, (a.lenMm / 1000).toFixed(2), u != null ? u.toFixed(2) : "", cost != null ? cost.toFixed(2) : ""]);
@@ -1214,7 +1214,7 @@ function renderBatch() {
   let combTotal = 0, anyComb = false, orderRows = "";
   for (const a of combinedOrder(results)) {
     let u = null, cost = null;
-    if (a.fixedPrice) { const p = ctx.partPrices[a.part]; if (p != null && Number.isFinite(p)) { u = p; cost = p * a.qty; } }
+    if (a.fixedPrice) { const p = fixingUnitPrice(a.part, ctx); if (p != null) { u = p; cost = p * a.qty; } }
     else { const ep = effectivePrice(a.code, ctx); if (ep != null) { u = ep; cost = (ep * a.lenMm) / 1000; } }
     if (cost != null) { combTotal += cost; anyComb = true; }
     orderRows += `<tr><td>${esc(a.part)}</td><td>${esc(a.code)}</td><td class="num">${a.qty}</td><td class="num">${(a.lenMm / 1000).toFixed(2)}</td><td class="num">${u != null ? u.toFixed(2) : "-"}</td><td class="num">${cost != null ? money(cost) : "-"}</td></tr>`;
