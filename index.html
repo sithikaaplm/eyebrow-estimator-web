@@ -508,6 +508,19 @@ function labourBreakdown(model, rate) {
   const cut = pieces * SEC_CUTTING_PER_PIECE, mach = pieces * SEC_MACHINING_PER_PIECE, total = cut + mach;
   return { pieces, cutSeconds: cut, machiningSeconds: mach, totalSeconds: total, ratePerHour: rate, cost: (total / 3600) * rate };
 }
+function weightBreakdown(model) {
+  const lenByCode = {};
+  for (const r of model.rows) {
+    if (isGroup(r) || r.external) continue;
+    if (STANDARD_WEIGHTS[r.code] == null) continue;
+    lenByCode[r.code] = (lenByCode[r.code] || 0) + r.len * r.qty;
+  }
+  const lines = Object.entries(lenByCode).map(([code, lenMm]) => {
+    const kgPerM = STANDARD_WEIGHTS[code];
+    return { code, kgPerM, lenMm, kg: (kgPerM * lenMm) / 1000 };
+  });
+  return { lines, totalKg: lines.reduce((t, l) => t + l.kg, 0) };
+}
 
 /* ---------- Nesting (nesting.ts) ---------- */
 /* End cuts for a piece, by row type. Mitred pieces are cut "/ \" (both ends 45°);
@@ -973,7 +986,7 @@ function renderCutList(model, costs, ctx) {
        <th>Part</th><th>Code</th><th class="num">Length (mm)</th><th class="num">Qty</th>
        <th class="num">Total (mm)</th><th class="num">Unit price</th><th class="num">Line cost</th>
      </tr></thead><tbody>${body}</tbody>${sub}</table>${cap}` +
-    renderLabour(model);
+    renderLabour(model) + renderWeight(model);
 }
 
 function renderLabour(model) {
@@ -987,6 +1000,19 @@ function renderLabour(model) {
     <div class="row"><span>Total time</span><b>${secMin(lb.totalSeconds)}</b></div>
     <div class="row"><span>Rate</span><b>${lb.ratePerHour ? money(lb.ratePerHour) + "/hr" : "- set a rate"}</b></div>
     <div class="row"><span>Labour cost</span><b>${money(lb.cost)}</b></div>
+  </div>`;
+}
+
+function renderWeight(model) {
+  const wb = weightBreakdown(model);
+  if (!wb.lines.length) return "";
+  const rows = wb.lines.map((l) =>
+    `<div class="row"><span>${esc(l.code)} - ${l.kgPerM.toFixed(3)} kg/m × ${(l.lenMm / 1000).toFixed(2)} m</span><b>${kg(l.kg)}</b></div>`
+  ).join("");
+  return `<div class="labour">
+    <h3>Weight breakdown</h3>
+    ${rows}
+    <div class="row"><span>Total weight</span><b>${kg(wb.totalKg)}</b></div>
   </div>`;
 }
 
