@@ -326,6 +326,8 @@
 const DEFAULT_CONFIG = { extAdd: 60, finOff: -10, brSpaceW: 800, brSpaceH: 900, endOffset: 117, holePitch: 100 };
 const DEFAULT_SCREW_CFG = { s25: 4, s50: 2, s32: 2, s19: 2, cap: 2, c72: 2, c79: 2 };
 const STANDARD_PRICES = { "20965": 36.65 / 5, "01072": 289 / 5, "01079": 226.95 / 5, "01070": 267.6 / 5, "24061": 172.05 / 5, "01069": 48.15 / 5 };
+// Material weight (kg/m) per extrusion code. Codes not listed (20965, 24061) add no weight.
+const STANDARD_WEIGHTS = { "01069": 0.381, "01070": 2.343, "01071": 3.452, "01072": 2.513, "01079": 2.513 };
 const STANDARD_PART_PRICES = { "40×20 channel": 9.05, "Fixing plate": 9.27, "75×25×3 angle bracket": 14.07, "Corner gusset": 18.07 };
 const FIXING_PART_NAMES = [];
 const SCREW_TYPES = ["8g × 25 pan", "8g × 50 2-pan", "8g × 32 pan", "8g × 19 truss", "Corner screw"];
@@ -340,7 +342,7 @@ const BOX_FIN_WIDTHS = [
   { width: 250, profiles: ["01072", "01079"] },
   { width: 300, profiles: ["01072", "01070"] },
 ];
-const BOX_FIN_PROFILE_NAMES = { "01072": "150 connectable", "01079": "100 cap", "01070": "150 cap" };
+const BOX_FIN_PROFILE_NAMES = { "01072": "150 x 50 Connectable", "01079": "100 x 50 End", "01070": "150 x 50 End" };
 
 const SCREW_FIELDS = [
   ["s25", "8g×25 pan / bracket"], ["s50", "8g×50 2-pan / bracket"], ["s32", "8g×32 pan / bracket"],
@@ -354,6 +356,9 @@ function nn(v, d) { return (v === undefined || v === null) ? d : v; }
 const isGroup = (r) => "group" in r;
 function fmt(n) { return Number.isInteger(n) ? String(n) : n.toFixed(1); }
 function money(n) { return "$" + n.toFixed(2); }
+function kg(n) { return n.toFixed(2) + " kg"; }
+function weightForLenMm(code, lenMm) { const w = STANDARD_WEIGHTS[code]; return w != null ? (w * lenMm) / 1000 : null; }
+function rowWeightKg(r) { return weightForLenMm(r.code, r.len * r.qty); }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 /* ---------- Geometry (compute.ts) ---------- */
@@ -401,8 +406,8 @@ function compute(W, H, depth, cfg, sc) {
 
   const fin = BOX_FIN_WIDTHS.find((o) => o.width === depth) || BOX_FIN_WIDTHS[2];
   const boxFinRows = [].concat(...fin.profiles.map((code) => [
-    { part: `Box fin (eyebrow) — ${BOX_FIN_PROFILE_NAMES[code] || code}`, code, len: finW, qty: 2, miter: true },
-    { part: `Box fin (eyebrow) — ${BOX_FIN_PROFILE_NAMES[code] || code}`, code, len: finH, qty: 2, miter: true },
+    { part: `Box fin: ${BOX_FIN_PROFILE_NAMES[code] || code}`, code, len: finW, qty: 2, miter: true },
+    { part: `Box fin: ${BOX_FIN_PROFILE_NAMES[code] || code}`, code, len: finH, qty: 2, miter: true },
   ]));
 
   const rows = [
@@ -471,7 +476,7 @@ function screwLineCost(s, ctx) {
   return p != null && Number.isFinite(p) ? p * s.qty : null;
 }
 function computeCosts(model, ctx) {
-  let ext = 0, extAny = false, pieces = 0, fix = 0, fixAny = false;
+  let ext = 0, extAny = false, pieces = 0, fix = 0, fixAny = false, wt = 0, wtAny = false;
   for (const r of model.rows) {
     if (isGroup(r)) continue;
     if (r.external) continue; // ordered ready-made from V6: not cut/priced in-house
@@ -481,6 +486,8 @@ function computeCosts(model, ctx) {
       ext += c; extAny = true;
       if (r.fixedPrice) { fix += c; fixAny = true; }   // fixedPrice rows = the APLM Fixings group
     }
+    const w = rowWeightKg(r);
+    if (w != null) { wt += w; wtAny = true; }
   }
   let scr = 0, scrAny = false;
   for (const s of model.screws) { const c = screwLineCost(s, ctx); if (c != null) { scr += c; scrAny = true; } }
@@ -492,6 +499,7 @@ function computeCosts(model, ctx) {
     fixingCost: fixAny ? fix : null,
     screwCost: scrAny ? scr : null,
     grandTotal: extAny || scrAny ? ext + scr + labourCost : null,
+    weightKg: wtAny ? wt : null,
   };
 }
 function labourBreakdown(model, rate) {
@@ -770,6 +778,7 @@ function buildSingleCsv(model, costs, ctx) {
   lines.push([]);
   lines.push(["Labour cost", "", "", "", "", "", costs.labourCost.toFixed(2)]);
   if (costs.grandTotal != null) lines.push(["Estimated total", "", "", "", "", "", costs.grandTotal.toFixed(2)]);
+  if (costs.weightKg != null) lines.push(["Total weight (kg)", "", "", "", "", "", costs.weightKg.toFixed(2)]);
   return csvJoin(lines);
 }
 
@@ -996,6 +1005,8 @@ function renderFasteners(model, costs, ctx) {
     foot += `<tr><td class="num" colspan="4">Fastener cost</td><td class="num">${money(costs.screwCost)}</td></tr>`;
   if (costs.grandTotal != null)
     foot += `<tr class="total"><td class="num" colspan="4">Total (extrusion + fasteners + labour)</td><td class="num">${money(costs.grandTotal)}</td></tr>`;
+  if (costs.weightKg != null)
+    foot += `<tr class="subtotal"><td class="num" colspan="4">Total weight</td><td class="num">${kg(costs.weightKg)}</td></tr>`;
 
   document.getElementById("fasteners").innerHTML =
     `<table><thead><tr>
@@ -1150,20 +1161,24 @@ function buildBatchResultsCsv(results, ctx) {
     }
     lines.push([b.number, "Labour", "", "", "", "", "", costs.labourCost.toFixed(2)]);
     if (costs.grandTotal != null) lines.push([b.number, "Window total", "", "", "", "", "", costs.grandTotal.toFixed(2)]);
+    if (costs.weightKg != null) lines.push([b.number, "Window weight (kg)", "", "", "", "", "", costs.weightKg.toFixed(2)]);
   }
   return csvJoin(lines);
 }
 function buildCombinedCsv(results, ctx) {
   const lines = [["Part", "Code", "Total qty", "Total length (m)", "Unit price", "Cost $"]];
-  let total = 0;
+  let total = 0, weight = 0, weightAny = false;
   for (const a of combinedOrder(results)) {
     let u = null, cost = null;
     if (a.fixedPrice) { const p = fixingUnitPrice(a.part, ctx); if (p != null) { u = p; cost = p * a.qty; } }
     else { const ep = effectivePrice(a.code, ctx); if (ep != null) { u = ep; cost = (ep * a.lenMm) / 1000; } }
     if (cost != null) total += cost;
+    const w = weightForLenMm(a.code, a.lenMm);
+    if (w != null) { weight += w; weightAny = true; }
     lines.push([a.part, a.code, a.qty, (a.lenMm / 1000).toFixed(2), u != null ? u.toFixed(2) : "", cost != null ? cost.toFixed(2) : ""]);
   }
   lines.push(["Combined extrusion cost", "", "", "", "", total.toFixed(2)]);
+  if (weightAny) lines.push(["Combined weight (kg)", "", "", "", "", weight.toFixed(2)]);
   lines.push([]);
   lines.push(["Screw type", "Total qty", "", "", "$ each", "Cost $"]);
   let scrTotal = 0;
@@ -1197,30 +1212,33 @@ function renderBatch() {
   if (!results.length) { host.innerHTML = ""; return; }
 
   // Per-window summary
-  let grand = 0, anyCost = false, sumRows = "";
+  let grand = 0, anyCost = false, weightTotal = 0, anyWeight = false, sumRows = "";
   for (const b of results) {
     if (!b.model) {
-      sumRows += `<tr class="err-row"><td>${esc(b.number)}</td><td class="num">${Number.isFinite(b.W) ? b.W : ""}</td><td class="num">${Number.isFinite(b.H) ? b.H : ""}</td><td colspan="3">${esc(b.error || "error")}</td></tr>`;
+      sumRows += `<tr class="err-row"><td>${esc(b.number)}</td><td class="num">${Number.isFinite(b.W) ? b.W : ""}</td><td class="num">${Number.isFinite(b.H) ? b.H : ""}</td><td colspan="4">${esc(b.error || "error")}</td></tr>`;
       continue;
     }
     const costs = computeCosts(b.model, ctx);
     if (costs.grandTotal != null) { grand += costs.grandTotal; anyCost = true; }
-    sumRows += `<tr><td>${esc(b.number)}</td><td class="num">${fmt(b.model.W)}</td><td class="num">${fmt(b.model.H)}</td><td class="num">${fmt(b.model.finW)}×${fmt(b.model.finH)}</td><td class="num">${b.model.brackets}</td><td class="num">${costs.grandTotal != null ? money(costs.grandTotal) : "-"}</td></tr>`;
+    if (costs.weightKg != null) { weightTotal += costs.weightKg; anyWeight = true; }
+    sumRows += `<tr><td>${esc(b.number)}</td><td class="num">${fmt(b.model.W)}</td><td class="num">${fmt(b.model.H)}</td><td class="num">${fmt(b.model.finW)}×${fmt(b.model.finH)}</td><td class="num">${b.model.brackets}</td><td class="num">${costs.grandTotal != null ? money(costs.grandTotal) : "-"}</td><td class="num">${costs.weightKg != null ? kg(costs.weightKg) : "-"}</td></tr>`;
   }
-  const summaryFoot = anyCost ? `<tfoot><tr><td class="num" colspan="5">Total estimated cost (${validCount} windows)</td><td class="num">${money(grand)}</td></tr></tfoot>` : "";
-  const summaryPanel = `<div class="panel"><h2>Per-window summary</h2><table><thead><tr><th>Window</th><th class="num">W</th><th class="num">H</th><th class="num">Box fin W×H</th><th class="num">Brackets</th><th class="num">Est. cost</th></tr></thead><tbody>${sumRows}</tbody>${summaryFoot}</table></div>`;
+  const summaryFoot = (anyCost || anyWeight) ? `<tfoot><tr><td class="num" colspan="5">Total estimated cost (${validCount} windows)</td><td class="num">${anyCost ? money(grand) : "-"}</td><td class="num">${anyWeight ? kg(weightTotal) : "-"}</td></tr></tfoot>` : "";
+  const summaryPanel = `<div class="panel"><h2>Per-window summary</h2><table><thead><tr><th>Window</th><th class="num">W</th><th class="num">H</th><th class="num">Box fin W×H</th><th class="num">Brackets</th><th class="num">Est. cost</th><th class="num">Weight (kg)</th></tr></thead><tbody>${sumRows}</tbody>${summaryFoot}</table></div>`;
 
   // Combined order
-  let combTotal = 0, anyComb = false, orderRows = "";
+  let combTotal = 0, anyComb = false, combWeight = 0, anyCombWeight = false, orderRows = "";
   for (const a of combinedOrder(results)) {
     let u = null, cost = null;
     if (a.fixedPrice) { const p = fixingUnitPrice(a.part, ctx); if (p != null) { u = p; cost = p * a.qty; } }
     else { const ep = effectivePrice(a.code, ctx); if (ep != null) { u = ep; cost = (ep * a.lenMm) / 1000; } }
     if (cost != null) { combTotal += cost; anyComb = true; }
-    orderRows += `<tr><td>${esc(a.part)}</td><td>${esc(a.code)}</td><td class="num">${a.qty}</td><td class="num">${(a.lenMm / 1000).toFixed(2)}</td><td class="num">${u != null ? u.toFixed(2) : "-"}</td><td class="num">${cost != null ? money(cost) : "-"}</td></tr>`;
+    const w = weightForLenMm(a.code, a.lenMm);
+    if (w != null) { combWeight += w; anyCombWeight = true; }
+    orderRows += `<tr><td>${esc(a.part)}</td><td>${esc(a.code)}</td><td class="num">${a.qty}</td><td class="num">${(a.lenMm / 1000).toFixed(2)}</td><td class="num">${u != null ? u.toFixed(2) : "-"}</td><td class="num">${cost != null ? money(cost) : "-"}</td><td class="num">${w != null ? kg(w) : "-"}</td></tr>`;
   }
-  const orderFoot = anyComb ? `<tfoot><tr><td class="num" colspan="5">Combined extrusion cost</td><td class="num">${money(combTotal)}</td></tr></tfoot>` : "";
-  const orderPanel = `<div class="panel"><h2>Combined order (all windows)</h2><table><thead><tr><th>Part</th><th>Code</th><th class="num">Total qty</th><th class="num">Total length (m)</th><th class="num">$/m</th><th class="num">Cost</th></tr></thead><tbody>${orderRows}</tbody>${orderFoot}</table></div>`;
+  const orderFoot = (anyComb || anyCombWeight) ? `<tfoot><tr><td class="num" colspan="5">Combined extrusion cost</td><td class="num">${anyComb ? money(combTotal) : "-"}</td><td class="num">${anyCombWeight ? kg(combWeight) : "-"}</td></tr></tfoot>` : "";
+  const orderPanel = `<div class="panel"><h2>Combined order (all windows)</h2><table><thead><tr><th>Part</th><th>Code</th><th class="num">Total qty</th><th class="num">Total length (m)</th><th class="num">$/m</th><th class="num">Cost</th><th class="num">Weight (kg)</th></tr></thead><tbody>${orderRows}</tbody>${orderFoot}</table></div>`;
 
   // Combined optimised cut list
   const allRows = [].concat(...results.map((b) => (b.model ? b.model.rows : [])));
