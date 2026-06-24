@@ -201,7 +201,7 @@
   <nav class="tabs no-print" id="tabs">
     <button class="tab active" data-tab="single">Single window</button>
     <button class="tab" data-tab="batch">Batch (CSV)</button>
-    <button class="tab" data-tab="resources">Resources</button>
+    <button class="tab" data-tab="resources">Dimension &amp; assembly information</button>
   </nav>
 
   <div id="singleView">
@@ -223,6 +223,8 @@
             <option value="250">250 mm</option>
             <option value="300">300 mm</option>
           </select></label>
+        <label class="fld">Finish / Colour <span style="font-weight:400;color:var(--muted)">(extrusion price)</span>
+          <select id="finish"></select></label>
 
         <details>
           <summary>Advanced rules</summary>
@@ -373,7 +375,38 @@
 /* ---------- Constants (ported from src/lib/eyebrow) ---------- */
 const DEFAULT_CONFIG = { extAdd: 60, finOff: -10, brSpaceW: 800, brSpaceH: 900, endOffset: 117, holePitch: 100 };
 const DEFAULT_SCREW_CFG = { s25: 4, s50: 2, s32: 2, s19: 2, cap: 2, c72: 2, c79: 2 };
-const STANDARD_PRICES = { "20965": 36.65 / 5, "01072": 289 / 5, "01079": 226.95 / 5, "01070": 267.6 / 5, "24061": 172.05 / 5, "01069": 48.15 / 5 };
+// Selectable extrusion finish/colour (ERP finish code → label), dropdown order, Mill first.
+const FINISHES = [
+  { code: "01", name: "Mill" },
+  { code: "21", name: "Bronze 12 Micron Anodised" },
+  { code: "22", name: "25 Micron Anodised (non-natural)" },
+  { code: "26", name: "Natural 12 Micron Anodised" },
+  { code: "28", name: "Natural 25 Micron Anodised" },
+  { code: "41", name: "Popular PC" },
+  { code: "43", name: "Intermediate PC" },
+  { code: "44", name: "Performance PC" },
+  { code: "45", name: "Decorative" },
+  { code: "46", name: "Premium PC" },
+];
+const DEFAULT_FINISH = "01";
+// Per-finish extrusion prices ($/m) by item code then finish code. From the Infor ERP
+// "Vantage Extrusion" pricebook (effective 2026-06-03, UM = LE). Mirror of src/lib/eyebrow.
+const FINISH_PRICES = {
+  "20965": { "01": 6.198506, "21": 7.995626, "22": 9.404956, "26": 7.673356, "28": 9.068256, "41": 7.170711, "43": 7.524246, "44": 8.209671, "45": 12.466521, "46": 9.741656 },
+  "01069": { "01": 8.245379, "21": 10.400771, "22": 12.069699, "26": 10.019139, "28": 11.670979, "41": 9.423907, "43": 9.842563, "44": 10.654243, "45": 15.695203, "46": 12.468419 },
+  "01070": { "01": 48.849268, "21": 54.978664, "22": 59.724678, "26": 53.893398, "28": 58.590818, "41": 52.200707, "43": 53.39126, "44": 55.699475, "45": 70.034705, "46": 60.858538 },
+  "01071": { "01": 71.565915, "21": 79.042431, "22": 84.831525, "26": 77.718645, "28": 83.448465, "41": 75.653934, "43": 77.106147, "44": 79.921662, "45": 97.407492, "46": 86.214585 },
+  "01072": { "01": 52.519916, "21": 59.578825, "22": 65.044564, "26": 58.32898, "28": 63.738756, "41": 56.379595, "43": 57.750694, "44": 60.408946, "45": 76.91809, "46": 66.350372 },
+  "01079": { "01": 41.528047, "21": 46.632379, "22": 50.709767, "26": 45.700007, "28": 49.735647, "41": 44.245785, "43": 45.268611, "44": 47.251641, "45": 59.567301, "46": 51.683887 },
+  "24061": { "01": 30.85472, "21": 37.81424, "22": 42.19752, "26": 36.81192, "28": 41.15032, "41": 33.742, "43": 34.84156, "44": 36.97336, "45": 50.21296, "46": 41.73812 },
+};
+/** $/m for every code at the given finish, falling back to Mill ('01'). */
+function pricesForFinish(finish) {
+  const out = {};
+  for (const [code, byFinish] of Object.entries(FINISH_PRICES)) out[code] = byFinish[finish] != null ? byFinish[finish] : byFinish["01"];
+  return out;
+}
+const STANDARD_PRICES = pricesForFinish(DEFAULT_FINISH);
 // Material weight (kg/m) per extrusion code. Codes not listed (20965, 24061) add no weight.
 const STANDARD_WEIGHTS = { "01069": 0.381, "01070": 2.343, "01071": 3.452, "01072": 2.513, "01079": 2.513 };
 const STANDARD_PART_PRICES = { "40×20 channel": 9.05, "Fixing plate": 9.27, "75×25×3 angle bracket": 14.07, "Corner gusset": 18.07 };
@@ -819,7 +852,13 @@ function csvJoin(lines) {
   return lines.map((row) => row.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(",")).join("\r\n");
 }
 function buildSingleCsv(model, costs, ctx) {
-  const lines = [["Part", "Code", "Length (mm)", "Qty", "Total (mm)", "Unit price", "Line cost $"]];
+  const lines = [];
+  if (ctx.finish) {
+    const name = (FINISHES.find((f) => f.code === ctx.finish) || {}).name || ctx.finish;
+    lines.push(["Finish", `${name} (${ctx.finish})`]);
+    lines.push([]);
+  }
+  lines.push(["Part", "Code", "Length (mm)", "Qty", "Total (mm)", "Unit price", "Line cost $"]);
   for (const r of model.rows) {
     if (isGroup(r)) { lines.push([r.group]); continue; }
     const u = r.external ? null : unitPrice(r, ctx);
@@ -850,6 +889,7 @@ const state = {
   config: { ...DEFAULT_CONFIG },
   screwCfg: { ...DEFAULT_SCREW_CFG },
   screwPrices: { ...DEFAULT_SCREW_PRICES }, partPrices: { ...STANDARD_PART_PRICES }, labourRate: "",
+  finish: DEFAULT_FINISH,
 };
 function load() {
   try {
@@ -862,6 +902,7 @@ function load() {
       screwCfg: { ...DEFAULT_SCREW_CFG, ...(s.screwCfg || {}) },
       screwPrices: { ...DEFAULT_SCREW_PRICES, ...(s.screwPrices || {}) }, partPrices: { ...(s.partPrices || {}), ...STANDARD_PART_PRICES },
       labourRate: nn(s.labourRate, ""),
+      finish: (s.finish && FINISHES.some((f) => f.code === s.finish)) ? s.finish : DEFAULT_FINISH,
     });
   } catch (e) { /* ignore */ }
 }
@@ -869,11 +910,12 @@ function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catc
 
 function buildCtx() {
   const priceData = {};
-  for (const [c, p] of Object.entries(STANDARD_PRICES)) priceData[c] = { pc: p };
+  for (const [c, p] of Object.entries(pricesForFinish(state.finish))) priceData[c] = { pc: p };
   return {
     priceData, manualPrices: {},
     screwPrices: state.screwPrices, partPrices: state.partPrices,
     labourRate: state.labourRate === "" ? 0 : Number(state.labourRate),
+    finish: state.finish,
   };
 }
 
@@ -882,6 +924,9 @@ function buildInputs() {
   document.getElementById("W").value = state.W;
   document.getElementById("H").value = state.H;
   document.getElementById("depth").value = state.depth;
+  const finishEl = document.getElementById("finish");
+  finishEl.innerHTML = FINISHES.map((f) => `<option value="${f.code}">${esc(f.name)}</option>`).join("");
+  finishEl.value = state.finish;
   for (const k of ["extAdd", "finOff", "brSpaceW", "brSpaceH"]) document.getElementById(k).value = state.config[k];
   document.getElementById("labourRate").value = state.labourRate;
   document.getElementById("kerfTxt").textContent = KERF;
@@ -900,8 +945,9 @@ function buildInputs() {
   document.getElementById("screwPrices").innerHTML = SCREW_TYPES.map((t) =>
     `<label class="fld sm">${esc(t)}<input class="sm" type="number" step="0.001" min="0" placeholder="$ each" data-screw="${esc(t)}" value="${nn(state.screwPrices[t], "")}" /></label>`).join("");
 
-  // Extrusion prices (read-only display)
-  document.getElementById("extPrices").innerHTML = Object.entries(STANDARD_PRICES)
+  // Extrusion prices (read-only display) for the selected finish
+  document.getElementById("extPrices").innerHTML = Object.entries(pricesForFinish(state.finish))
+    .filter(([c]) => EXTRUSION_NAMES[c])
     .map(([c, p]) => `${c} - ${EXTRUSION_NAMES[c]}: <b>${money(p)}/m</b>`).join("<br>");
 
   // Listeners
@@ -909,6 +955,13 @@ function buildInputs() {
   document.getElementById("W").addEventListener("input", (e) => { state.W = num(e.target); onChange(); });
   document.getElementById("H").addEventListener("input", (e) => { state.H = num(e.target); onChange(); });
   document.getElementById("depth").addEventListener("change", (e) => { state.depth = num(e.target); onChange(); });
+  document.getElementById("finish").addEventListener("change", (e) => {
+    state.finish = e.target.value;
+    document.getElementById("extPrices").innerHTML = Object.entries(pricesForFinish(state.finish))
+      .filter(([c]) => EXTRUSION_NAMES[c])
+      .map(([c, p]) => `${c} - ${EXTRUSION_NAMES[c]}: <b>${money(p)}/m</b>`).join("<br>");
+    onChange();
+  });
   for (const k of ["extAdd", "finOff", "brSpaceW", "brSpaceH"])
     document.getElementById(k).addEventListener("input", (e) => { const v = num(e.target); state.config[k] = Number.isNaN(v) ? 0 : v; onChange(); });
   document.getElementById("labourRate").addEventListener("input", (e) => {
@@ -1027,7 +1080,8 @@ function renderCutList(model, costs, ctx) {
     ? `<p class="caption">Items with no price are shown as -.</p>` : "";
 
   const m = model;
-  const summary = `<p class="summary">Window <b>${fmt(m.W)} × ${fmt(m.H)}mm</b> · Box fin <b>${fmt(m.finW)} × ${fmt(m.finH)}mm</b> · Brackets <b>${m.brW}</b> top/bottom · <b>${m.brH}</b> each side · Total brackets <b>${m.brackets}</b>.</p>`;
+  const finishName = (FINISHES.find((f) => f.code === state.finish) || {}).name || state.finish;
+  const summary = `<p class="summary">Window <b>${fmt(m.W)} × ${fmt(m.H)}mm</b> · Box fin <b>${fmt(m.finW)} × ${fmt(m.finH)}mm</b> · Brackets <b>${m.brW}</b> top/bottom · <b>${m.brH}</b> each side · Total brackets <b>${m.brackets}</b> · Finish <b>${esc(finishName)}</b>.</p>`;
 
   document.getElementById("cutlist").innerHTML = summary +
     `<table><thead><tr>
