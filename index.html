@@ -375,6 +375,9 @@
 /* ---------- Constants (ported from src/lib/eyebrow) ---------- */
 const DEFAULT_CONFIG = { extAdd: 60, finOff: -10, brSpaceW: 800, brSpaceH: 900, endOffset: 117, holePitch: 100 };
 const DEFAULT_SCREW_CFG = { s25: 4, s50: 2, s32: 2, s19: 2, cap: 2, c72: 2, c79: 2 };
+// Above this raw frame height (mm) the LH/RH side splits into 2×99.3 cutouts +
+// middle infill + n angle brackets. Strict >: H = 850 stays single-piece.
+const SIDE_SPLIT_MAX_H = 850;
 // Selectable extrusion finish/colour (ERP finish code → label), dropdown order, Mill first.
 const FINISHES = [
   { code: "01", name: "Mill" },
@@ -464,7 +467,9 @@ function compute(W, H, depth, cfg, sc) {
   const extW = W + cfg.extAdd, extH = H + cfg.extAdd;
   const finW = W + finFromFrame, finH = H + finFromFrame;
   const brW = bracketCount(finW, cfg, cfg.brSpaceW);
-  const brH = finH > cfg.brSpaceH ? bracketCount(finH, cfg, cfg.brSpaceH) : 0;
+  // LH/RH side splits (brackets + trapezoids + mid covers) once the raw frame
+  // height passes 850mm; brSpaceH stays the bracket-spacing limit. Strict >.
+  const brH = H > SIDE_SPLIT_MAX_H ? bracketCount(finH, cfg, cfg.brSpaceH) : 0;
   const brackets = 2 * brW + 2 * brH;
 
   const trapWidth = 99.3;
@@ -478,7 +483,7 @@ function compute(W, H, depth, cfg, sc) {
 
   const hHoles = bracketHoles(finH, brH, cfg);
   const sideGapCC = hHoles.length > 1 ? hHoles[1] - hHoles[0] : finH;
-  const sideEdgeCover = finH;
+  const sideEdgeCover = finH - 4; // box-fin member length less 2mm each end
   const sideMidCover = Math.max(0, sideGapCC - 120);
   const sideMidCount = 2 * (brH - 1);
   const sideCoverRow = brH > 0
