@@ -774,10 +774,14 @@ function buildDiagram(model) {
   const holesTop = bracketHoles(W, model.brW, cfg);
   if (holesTop.length && rw > 160) {
     const o = cfg.endOffset, p2 = o + PITCH, dy = y0 + 24;
-    const tick = (xmm) => line({ x1: x0 + xmm * scale, y1: y0, x2: x0 + xmm * scale, y2: dy + 4, stroke: "#8a4a6a", strokeWidth: 0.8 });
+    // End offset measured from the box-fin OUTER edge (the part end), not the
+    // frame centreline at x0 (which reads as "from the middle"). xmm 0 → outer edge.
+    const endX = x0 - HT;
+    const xAt = (xmm) => (xmm === 0 ? endX : x0 + xmm * scale);
+    const tick = (xmm) => line({ x1: xAt(xmm), y1: xmm === 0 ? y0 - HT : y0, x2: xAt(xmm), y2: dy + 4, stroke: "#8a4a6a", strokeWidth: 0.8 });
     const seg = (a, b, txt) => {
-      line({ x1: x0 + a * scale, y1: dy, x2: x0 + b * scale, y2: dy, stroke: "#8a4a6a", strokeWidth: 0.8 });
-      text({ x: x0 + ((a + b) / 2) * scale, y: dy - 4, text: txt, anchor: "middle", fontSize: 11, fill: "#8a4a6a" });
+      line({ x1: xAt(a), y1: dy, x2: xAt(b), y2: dy, stroke: "#8a4a6a", strokeWidth: 0.8 });
+      text({ x: (xAt(a) + xAt(b)) / 2, y: dy - 4, text: txt, anchor: "middle", fontSize: 11, fill: "#8a4a6a" });
     };
     tick(0); tick(o); tick(p2);
     seg(0, o, `${fmt(o)}`); seg(o, p2, `${fmt(PITCH)}`);
@@ -788,10 +792,14 @@ function buildDiagram(model) {
   const holesLeftDim = model.brH > 0 ? bracketHoles(H, model.brH, cfg) : [];
   if (holesLeftDim.length && rh > 160) {
     const o = cfg.endOffset, p2 = o + PITCH, dx = x0 - 22;
-    const tickY = (ymm) => line({ x1: x0, y1: y0 + ymm * scale, x2: dx - 4, y2: y0 + ymm * scale, stroke: "#8a4a6a", strokeWidth: 0.8 });
+    // Measured from the box-fin OUTER edge (the part end): ymm 0 → y0 − HT, not
+    // the frame centreline at y0 (which reads as "from the middle").
+    const endY = y0 - HT;
+    const yAt = (ymm) => (ymm === 0 ? endY : y0 + ymm * scale);
+    const tickY = (ymm) => line({ x1: ymm === 0 ? x0 - HT : x0, y1: yAt(ymm), x2: dx - 4, y2: yAt(ymm), stroke: "#8a4a6a", strokeWidth: 0.8 });
     const segY = (a, b, txt) => {
-      line({ x1: dx, y1: y0 + a * scale, x2: dx, y2: y0 + b * scale, stroke: "#8a4a6a", strokeWidth: 0.8 });
-      const my = y0 + ((a + b) / 2) * scale;
+      line({ x1: dx, y1: yAt(a), x2: dx, y2: yAt(b), stroke: "#8a4a6a", strokeWidth: 0.8 });
+      const my = (yAt(a) + yAt(b)) / 2;
       text({ x: dx - 4, y: my, text: txt, anchor: "middle", fontSize: 11, fill: "#8a4a6a", transform: `rotate(-90 ${dx - 4} ${my})` });
     };
     tickY(0); tickY(o); tickY(p2);
