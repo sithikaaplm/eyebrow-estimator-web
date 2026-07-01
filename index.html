@@ -1086,7 +1086,7 @@ function renderCutList(model, costs, ctx) {
       : (c != null ? money(c) : "-");
     body += `<tr${r.external ? ' class="external"' : ""}>
       <td>${esc(r.part)}</td>
-      <td>${r.fixedPrice ? "" : esc(r.code)}</td>
+      <td>${esc(r.code)}</td>
       <td class="num">${lenCell}</td>
       <td class="num">${r.qty}</td>
       <td class="num">${totCell}</td>
