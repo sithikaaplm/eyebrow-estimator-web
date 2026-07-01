@@ -280,7 +280,7 @@
       <h2>Diagram - front elevation (not to scale)</h2>
       <div id="diagram" class="diagram-fluid" style="overflow-x:auto"></div>
       <div class="legend">
-        <span><i style="background:#b06a8e"></i>Angle bracket (01233) - top, bottom &amp; sides</span>
+        <span><i style="background:#b06a8e"></i>Angle bracket (9700790) - top, bottom &amp; sides</span>
         <span><i style="background:#d6a25a"></i>Infill cover 01069 - edges + between brackets</span>
       </div>
     </div>
@@ -404,7 +404,7 @@ function pricesForFinish(finish) {
 }
 const STANDARD_PRICES = pricesForFinish(DEFAULT_FINISH);
 // Material weight (kg/m) per extrusion code. Codes not listed (20965, 24061) add no weight.
-const STANDARD_WEIGHTS = { "01069": 0.381, "01070": 2.343, "01071": 3.452, "01072": 2.513, "01079": 2.513 };
+const STANDARD_WEIGHTS = { "01069": 0.381, "01070": 2.343, "01071": 3.452, "01072": 2.513, "01079": 2.513, "9700792": 0.381 };
 // angle bracket / corner gusset stored ex-freight; pricing adds +3% freight on display.
 const STANDARD_PART_PRICES = { "40×20 channel": 9.05, "Fixing plate": 9.27, "Angle Bracket": 12.28, "Corner gusset": 17.226 };
 const FIXING_PART_NAMES = [];
@@ -501,10 +501,10 @@ function compute(W, H, depth, cfg, sc) {
     { part: "RTH 44mm frame", code: "24061", len: W, qty: 2, miter: true, external: true },
     { part: "RTH 44mm frame", code: "24061", len: H, qty: 2, miter: true, external: true },
     { group: "APLM Fixings" },
-    { part: "Angle Bracket", code: "01233", len: 120, qty: brackets, fixedPrice: true },
-    { part: "40×20 channel", code: "01249", len: 120, qty: brackets, fixedPrice: true },
-    { part: "Fixing plate", code: "01069", len: 120, qty: brackets, fixedPrice: true },
-    { part: "Corner gusset", code: "01072", len: 0, qty: 4, fixedPrice: true },
+    { part: "Angle Bracket", code: "9700790", len: 120, qty: brackets, fixedPrice: true },
+    { part: "40×20 channel", code: "9700791", len: 120, qty: brackets, fixedPrice: true },
+    { part: "Fixing plate", code: "9700792", len: 120, qty: brackets, fixedPrice: true },
+    { part: "Corner gusset", code: "9700793", len: 0, qty: 4, fixedPrice: true },
     { group: "Infill covers (01069)" },
     { part: "Cover - LH/RH trapezoid (edge)", code: "01069", len: trapWidth, qty: trapCount, note: true, trapezoid: true },
     sideCoverRow,
@@ -513,9 +513,9 @@ function compute(W, H, depth, cfg, sc) {
 
   const mult = { bracket: brackets, corner: 4, window: 1 };
   const defs = [
-    ["8g × 25 pan", "Angle bracket (01233)", "bracket", sc.s25],
+    ["8g × 25 pan", "Angle bracket (9700790)", "bracket", sc.s25],
     ["8g × 50 2-pan", "Bracket + channel (shared)", "bracket", sc.s50],
-    ["8g × 32 pan", "Channel (01249)", "bracket", sc.s32],
+    ["8g × 32 pan", "Channel (9700791)", "bracket", sc.s32],
     ["8g × 19 truss", "Angle bracket", "bracket", sc.s19],
     ["8g × 19 truss", "Box fin cap", "corner", sc.cap],
     ["Corner screw", "Box fin 01072 corners", "corner", sc.c72],
