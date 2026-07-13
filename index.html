@@ -125,6 +125,7 @@
   .seg.cut { background: #bae6fd; color: #0c4a6e; border-right: 1px solid rgba(255,255,255,.8); min-width: 2.75rem; }
   .seg.cut.ext { background: #e2e8f0; color: #64748b; }
   .seg.off { background: #f1f5f9; color: var(--muted2); font-style: italic; }
+  .seg.trim { flex-shrink: 0; min-width: 6px; background-image: repeating-linear-gradient(45deg, #fecdd3 0 3px, #fda4af 3px 6px); }
   .seg span.seglbl, .seg.off span { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   .seg .seglbl { position: relative; z-index: 10; }
   /* 45° accent overlay at an angled (mitred) end; ~bar-height wide, sits under the label */
@@ -411,7 +412,7 @@ const FIXING_PART_NAMES = [];
 const SCREW_TYPES = ["8g × 25 pan", "8g × 50 2-pan", "8g × 32 pan", "8g × 19 truss", "Corner screw"];
 /* every screw type defaults to $0.10 each; users can still change any of them */
 const DEFAULT_SCREW_PRICES = SCREW_TYPES.reduce((o, t) => { o[t] = 0.1; return o; }, {});
-const STOCK_LENGTH = 5000, KERF = 5;
+const STOCK_LENGTH = 5000, END_TRIM = 50, USABLE_LENGTH = STOCK_LENGTH - 2 * END_TRIM, KERF = 5;
 const SEC_CUTTING_PER_PIECE = 120, SEC_MACHINING_PER_PIECE = 240;
 const EXTRUSION_NAMES = { "20965": "Frame extender", "01072": "Box fin (150 connectable)", "01079": "Box fin cap (100)", "01070": "Box fin cap (150)", "24061": "RTH 44mm frame", "01069": "Infill cover" };
 const BOX_FIN_WIDTHS = [
@@ -628,12 +629,12 @@ function nestExtrusions(rows) {
     const sticks = [], oversized = [];
     for (const cut of [...pieces].sort((a, b) => b.len - a.len)) {
       const need = cut.len + KERF;
-      if (need > STOCK_LENGTH) { oversized.push(cut.len); continue; }
-      const stick = sticks.find((s) => s.used + need <= STOCK_LENGTH);
+      if (need > USABLE_LENGTH) { oversized.push(cut.len); continue; }
+      const stick = sticks.find((s) => s.used + need <= USABLE_LENGTH);
       if (stick) { stick.cuts.push(cut); stick.used += need; }
-      else sticks.push({ cuts: [cut], used: need, offcut: 0 });
+      else sticks.push({ cuts: [cut], used: need, offcut: 0, trim: 2 * END_TRIM });
     }
-    for (const s of sticks) s.offcut = STOCK_LENGTH - s.used;
+    for (const s of sticks) s.offcut = USABLE_LENGTH - s.used;
     const placed = pieces.length - oversized.length;
     groups.push({
       code, name: EXTRUSION_NAMES[code] || code,
@@ -1176,8 +1177,9 @@ function optimiserHtml(rows) {
   let html = "";
   for (const g of groups) {
     let sticks = "";
+    const trimCap = `<div class="seg trim" style="flex-grow:${END_TRIM};flex-basis:0" title="end trim ${END_TRIM}mm — saw waste"></div>`;
     g.sticks.forEach((s, i) => {
-      let segs = "";
+      let segs = trimCap;
       for (const c of s.cuts) {
         const angled = c.left || c.right;
         const both = c.left && c.right;
@@ -1189,10 +1191,11 @@ function optimiserHtml(rows) {
       }
       if (s.offcut > 0)
         segs += `<div class="seg off" style="flex-grow:${s.offcut};flex-basis:0" title="offcut ${fmt(s.offcut)}mm"><span>offcut ${fmt(s.offcut)}</span></div>`;
+      segs += trimCap;
       sticks += `<div class="stick"><span class="lbl">${g.sticks.length > 1 ? "#" + (i + 1) : ""}</span><div class="bar">${segs}</div></div>`;
     });
     const warn = g.oversized.length
-      ? `<p class="optwarn">⚠ ${g.oversized.length} piece${g.oversized.length === 1 ? "" : "s"} longer than a 5 m stock length (${g.oversized.map(fmt).join(", ")}mm) - cannot be cut from one length.</p>` : "";
+      ? `<p class="optwarn">⚠ ${g.oversized.length} piece${g.oversized.length === 1 ? "" : "s"} longer than the usable 4.9 m length (${g.oversized.map(fmt).join(", ")}mm) - cannot be cut from one length.</p>` : "";
     const sticksLabel = g.external
       ? `<span class="sticks-needed ext">${g.sticksNeeded} × 5 m extrusion${g.sticksNeeded === 1 ? "" : "s"} ordered from V6</span>`
       : `<span class="sticks-needed">${g.sticksNeeded} × 5 m extrusion${g.sticksNeeded === 1 ? "" : "s"}</span>`;
@@ -1205,7 +1208,7 @@ function optimiserHtml(rows) {
         ${sticksLabel}
       </div>
       ${sticks}
-      <p class="optfoot">${g.pieceCount} piece${g.pieceCount === 1 ? "" : "s"} · ${fmt(g.totalLength)}mm cut · ${fmt(g.offcutTotal)}mm offcut${miterNote}</p>
+      <p class="optfoot">${g.pieceCount} piece${g.pieceCount === 1 ? "" : "s"} · ${fmt(g.totalLength)}mm cut · ${fmt(g.offcutTotal)}mm offcut · <span style="color:#e11d48">${fmt(g.sticksNeeded * 2 * END_TRIM)}mm end-trim</span>${miterNote}</p>
       ${warn}
     </div>`;
   }
