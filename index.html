@@ -303,7 +303,7 @@
         </details>
 
         <details>
-          <summary>Extrusion prices ($/m, fixed)</summary>
+          <summary>Extrusion rates (used to price whole 5 m lengths)</summary>
           <div id="extPrices" class="fixed-note" style="margin-top:6px"></div>
         </details>
       </div>
@@ -314,6 +314,10 @@
       <div class="panel flow">
         <h2>Cut list</h2>
         <div id="cutlist"></div>
+      </div>
+      <div class="panel flow" id="pricingPanel">
+        <h2>Pricing - APL sell</h2>
+        <div id="pricing"></div>
       </div>
       <div class="panel flow" id="fastenersPanel">
         <h2>Fasteners (screws)</h2>
@@ -613,17 +617,33 @@ function screwLineCost(s, ctx) {
   const p = ctx.screwPrices[s.type];
   return p != null && Number.isFinite(p) ? p * s.qty : null;
 }
+/* Extrusions are sold by the whole 5 m stock length. The exact cuts stay in
+   the cut list, while these lines state what the customer must order. */
+function stockLines(model, ctx) {
+  const lines = [];
+  for (const g of nestExtrusions(model.rows)) {
+    if (g.external || g.sticksNeeded === 0) continue;
+    const perMetre = effectivePrice(g.code, ctx);
+    if (perMetre == null) continue;
+    const unitPrice = perMetre * (STOCK_LENGTH / 1000);
+    lines.push({
+      code: g.code,
+      name: g.name,
+      sticks: g.sticksNeeded,
+      unitPrice,
+      total: unitPrice * g.sticksNeeded,
+    });
+  }
+  return lines;
+}
 function computeCosts(model, ctx) {
-  let ext = 0, extAny = false, pieces = 0, fix = 0, fixAny = false, wt = 0, wtAny = false;
+  let pieces = 0, fix = 0, fixAny = false, wt = 0, wtAny = false;
   for (const r of model.rows) {
     if (isGroup(r)) continue;
     if (r.external) continue; // ordered ready-made from V6: not cut/priced in-house
     if (!r.fixedPrice) pieces += r.qty;
     const c = lineCost(r, ctx);
-    if (c != null) {
-      ext += c; extAny = true;
-      if (r.fixedPrice) { fix += c; fixAny = true; }   // fixedPrice rows = the APLM Fixings group
-    }
+    if (c != null && r.fixedPrice) { fix += c; fixAny = true; }
     const w = rowWeightKg(r);
     if (w != null) { wt += w; wtAny = true; }
   }
@@ -631,9 +651,14 @@ function computeCosts(model, ctx) {
   for (const s of model.screws) { const c = screwLineCost(s, ctx); if (c != null) { scr += c; scrAny = true; } }
   const labourSeconds = pieces * (SEC_CUTTING_PER_PIECE + SEC_MACHINING_PER_PIECE);
   const labourCost = (labourSeconds / 3600) * (ctx.labourRate || 0);
+  const stocks = stockLines(model, ctx);
+  const stockTotal = stocks.reduce((sum, line) => sum + line.total, 0);
+  const extAny = stocks.length > 0 || fixAny;
+  const ext = stockTotal + fix;
   return {
     labourCost,
     extrusionCost: extAny ? ext : null,
+    stockLines: stocks,
     fixingCost: fixAny ? fix : null,
     screwCost: scrAny ? scr : null,
     grandTotal: extAny || scrAny ? ext + scr + labourCost : null,
@@ -977,14 +1002,27 @@ function buildSingleCsv(model, costs, ctx) {
   lines.push(["Window frame", `${fmt(model.W)} x ${fmt(model.H)}`]);
   lines.push(["Box fin", `${fmt(model.finW)} x ${fmt(model.finH)}`]);
   lines.push([]);
-  lines.push(["Part", "Code", "Length (mm)", "Qty", "Total (mm)", "Unit price", "Line cost $"]);
+  lines.push(["Cut list"]);
+  lines.push(["Part", "Code", "Length (mm)", "Qty", "Total (mm)"]);
   for (const r of model.rows) {
     if (isGroup(r)) { lines.push([r.group]); continue; }
-    const u = r.external ? null : unitPrice(r, ctx);
-    const c = r.external ? null : lineCost(r, ctx);
-    lines.push([r.part, r.code, fmt(r.len), r.qty, fmt(r.len * r.qty), u != null ? u.toFixed(2) : "", r.external ? "from V6" : (c != null ? c.toFixed(2) : "")]);
+    lines.push([r.part, r.code, fmt(r.len), r.qty, fmt(r.len * r.qty)]);
   }
-  if (costs.extrusionCost != null) lines.push(["Extrusion cost", "", "", "", "", "", costs.extrusionCost.toFixed(2)]);
+  lines.push([]);
+  lines.push(["Pricing - APL sell", "", "", "", "", "NZD ex GST"]);
+  lines.push(["Extrusions - whole stock lengths"]);
+  for (const line of costs.stockLines) {
+    lines.push([
+      `${line.name} - 5m stock length`,
+      line.code,
+      "5m",
+      line.sticks,
+      "",
+      line.unitPrice.toFixed(2),
+      line.total.toFixed(2),
+    ]);
+  }
+  if (costs.extrusionCost != null) lines.push(["Materials - whole stock lengths & fixings", "", "", "", "", "", costs.extrusionCost.toFixed(2)]);
   if (model.screws.length) {
     lines.push([]);
     lines.push(["Fasteners", "Screw type", "", "Qty", "", "$ each", "Cost $"]);
@@ -1136,7 +1174,7 @@ function render() {
   document.getElementById("errW").textContent = eW;
   document.getElementById("errH").textContent = eH;
 
-  const panels = ["fastenersPanel", "diagramPanel", "optPanel"];
+  const panels = ["pricingPanel", "fastenersPanel", "diagramPanel", "optPanel"];
   if (!valid) {
     lastModel = lastCosts = null;
     document.getElementById("cutlist").innerHTML =
@@ -1152,59 +1190,33 @@ function render() {
   lastModel = model; lastCosts = costs;
 
   renderCutList(model, costs, ctx);
+  renderPricing(model, costs, ctx);
   renderFasteners(model, costs, ctx);
   document.getElementById("diagram").innerHTML = diagramSVG(buildDiagram(model));
   renderLegend();
   document.getElementById("optimiser").innerHTML = optimiserHtml(model.rows);
   wrapTables(document.getElementById("cutlist"));
+  wrapTables(document.getElementById("pricing"));
   wrapTables(document.getElementById("fasteners"));
 }
 
 function renderCutList(model, costs, ctx) {
-  let anyMissing = false;
   let body = "";
-  let curGroup = null, groupSum = 0, groupPriced = false;
-  const flushSubtotal = () => {
-    if (curGroup && groupPriced)
-      body += `<tr class="subtotal"><td colspan="6" class="num">${esc(curGroup)} subtotal</td><td class="num">${money(groupSum)}</td></tr>`;
-    groupSum = 0; groupPriced = false;
-  };
   for (const r of model.rows) {
     if (isGroup(r)) {
-      flushSubtotal();
-      curGroup = r.group;
-      body += `<tr class="group"><td colspan="7">${esc(r.group)}</td></tr>`;
+      body += `<tr class="group"><td colspan="5">${esc(r.group)}</td></tr>`;
       continue;
-    }
-    const u = r.external ? null : unitPrice(r, ctx);
-    // Items ordered ready-made from V6 are excluded from the in-house cost.
-    const c = r.external ? null : lineCost(r, ctx);
-    if (!r.external) {
-      if (c == null) anyMissing = true; else { groupSum += c; groupPriced = true; }
     }
     const lenCell = r.fixedPrice ? "-" : fmt(r.len);
     const totCell = r.fixedPrice ? "-" : fmt(r.len * r.qty);
-    const uCell = u != null
-      ? `${u.toFixed(2)}<span class="suffix">${r.fixedPrice ? "/ea" : "/m"}</span>`
-      : "-";
-    const costCell = r.external
-      ? `<span class="from-v6">from V6</span>`
-      : (c != null ? money(c) : "-");
     body += `<tr${r.external ? ' class="external"' : ""}>
-      <td>${esc(r.part)}</td>
+      <td>${esc(r.part)}${r.external ? ' <span class="from-v6">- from V6</span>' : ""}</td>
       <td class="mono">${codeSwatch(r.code, r.external)}${esc(r.code)}</td>
       <td class="num">${lenCell}</td>
       <td class="num">${r.qty}</td>
       <td class="num">${totCell}</td>
-      <td class="num">${uCell}</td>
-      <td class="num">${costCell}</td>
     </tr>`;
   }
-  flushSubtotal();
-  const sub = costs.extrusionCost != null
-    ? `<tfoot><tr><td class="num" colspan="6">Estimated extrusion cost</td><td class="num">${money(costs.extrusionCost)}</td></tr></tfoot>` : "";
-  const cap = (costs.extrusionCost != null && anyMissing)
-    ? `<p class="caption">Items with no price are shown as -.</p>` : "";
 
   const m = model;
   const finishName = (FINISHES.find((f) => f.code === state.finish) || {}).name || state.finish;
@@ -1214,9 +1226,52 @@ function renderCutList(model, costs, ctx) {
   document.getElementById("cutlist").innerHTML = summary +
     `<table><thead><tr>
        <th>Part</th><th>Code</th><th class="num">Length (mm)</th><th class="num">Qty</th>
-       <th class="num">Total (mm)</th><th class="num">Unit price</th><th class="num">Line cost</th>
-     </tr></thead><tbody>${body}</tbody>${sub}</table>${cap}` +
+       <th class="num">Total (mm)</th>
+     </tr></thead><tbody>${body}</tbody></table>` +
     renderLabour(model) + renderWeight(model);
+}
+
+function renderPricing(model, costs, ctx) {
+  const finishName = (FINISHES.find((f) => f.code === state.finish) || {}).name || state.finish;
+  const colourTxt = state.colour.trim();
+  let rows = costs.stockLines.length
+    ? `<tr class="group"><td colspan="4">Extrusions - whole stock lengths</td></tr>`
+    : "";
+  for (const line of costs.stockLines) {
+    rows += `<tr>
+      <td class="mono">${esc(line.code)}</td>
+      <td>${esc(line.name)} - 5 m stock length</td>
+      <td class="num">${line.sticks} &times; 5 m <span class="suffix">@ ${money(line.unitPrice)}</span></td>
+      <td class="num"><b>${money(line.total)}</b></td>
+    </tr>`;
+  }
+
+  const fixings = model.rows.filter((r) => !isGroup(r) && r.fixedPrice);
+  if (fixings.length) rows += `<tr class="group"><td colspan="4">APLM fixings</td></tr>`;
+  for (const r of fixings) {
+    const price = fixingUnitPrice(r.part, ctx);
+    rows += `<tr>
+      <td class="mono">${esc(r.code)}</td><td>${esc(r.part)}</td>
+      <td class="num">${r.qty}${price != null ? ` <span class="suffix">@ ${money(price)}</span>` : ""}</td>
+      <td class="num"><b>${price != null ? money(price * r.qty) : "-"}</b></td>
+    </tr>`;
+  }
+
+  if (model.screws.length) rows += `<tr class="group"><td colspan="4">Fasteners</td></tr>`;
+  for (const s of model.screws) {
+    const price = ctx.screwPrices[s.type], total = screwLineCost(s, ctx);
+    rows += `<tr><td>${esc(s.type)}</td><td>${esc(s.area)}</td>
+      <td class="num">${s.qty}${price != null ? ` <span class="suffix">@ ${money(price)}</span>` : ""}</td>
+      <td class="num"><b>${total != null ? money(total) : "-"}</b></td></tr>`;
+  }
+  rows += `<tr class="group"><td colspan="4">Labour</td></tr>
+    <tr><td colspan="2">Cutting and machining</td><td></td><td class="num"><b>${money(costs.labourCost)}</b></td></tr>`;
+  const total = costs.grandTotal != null
+    ? `<tfoot><tr><td colspan="3"><b>Total</b></td><td class="num"><b>${money(costs.grandTotal)}</b></td></tr></tfoot>`
+    : "";
+  document.getElementById("pricing").innerHTML =
+    `<p class="summary" style="text-align:right">${esc(finishName)}${colourTxt ? ` · ${esc(colourTxt)}` : ""} · NZD, ex GST</p>
+     <table><tbody>${rows}</tbody>${total}</table>`;
 }
 
 function renderLabour(model) {
