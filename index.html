@@ -169,6 +169,32 @@
   code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   tr.err-row td { color: #dc2626; }
 
+  /* Quote list */
+  .qhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .qmeta { margin: 0; font-size: 12px; color: var(--muted); }
+  .qjob { font-size: 12px; font-weight: 600; color: #334155; }
+  .qjob input { width: 260px; }
+  .qtable td { vertical-align: top; }
+  .qtable input { margin-top: 0; }
+  .qtable input.qnum { text-align: right; }
+  .qtable td.qprice { padding-top: 13px; }
+  .qtable .qline-err { margin-top: 3px; font-size: 11px; color: #dc2626; }
+  .qdel { font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+          border: 1px solid #fca5a5; background: #fff; color: #dc2626; }
+  #dropzone.dropzone { margin-top: 12px; padding: 12px; font-size: 12px; }
+  .qtotals { margin: 18px 0 0 auto; max-width: 360px; font-size: 14px; }
+  .qrow { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #f1f5f9; }
+  .qrow > span:first-child, .qrow > label { color: #475569; }
+  .qmargin { display: flex; align-items: center; gap: 12px; }
+  .qmargin input { width: 80px; margin-top: 0; text-align: right; }
+  .qmargin #qMarginAmt { min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
+  .qgrand { border-bottom: none; font-size: 16px; font-weight: 700; color: var(--blue7); }
+  .qgrand > span:first-child { color: var(--blue7); }
+  .qerr, .qwarn { font-size: 12px; color: #dc2626; }
+  .qerr:empty, .qwarn:empty { display: none; }
+  .qnote { margin: 4px 0 0; font-size: 11px; color: var(--muted2); }
+  .print-only { display: none; }
+
   /* Horizontal-scroll wrapper for wide data tables (harmless on desktop) */
   .tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -216,6 +242,15 @@
 
   @media print {
     .no-print { display: none !important; }
+    /* Quote list: inputs print as plain values; each print button hides the other half */
+    .print-only { display: inline; }
+    .qmargin input, #jobName { display: none; }
+    .qtable input { border: none; padding: 0; background: none; }
+    .qtable input.qnum { -moz-appearance: textfield; }
+    .qtable input.qnum::-webkit-inner-spin-button, .qtable input.qnum::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .qtable td.qprice { padding-top: 6px; }
+    body.print-quote .cutsheets, body.print-quote .cost-only { display: none !important; }
+    body.print-cut #quotePanel { display: none !important; }
     body { background: #fff; }
     /* Tall panels (cut list, fasteners) must flow across pages - forcing them
        whole strands the header alone on page 1. Keep small blocks intact. */
@@ -246,7 +281,7 @@
 
 <nav class="tabs no-print" id="tabs">
   <button class="tabbtn active" data-tab="single">Single window</button>
-  <button class="tabbtn" data-tab="batch">Batch (CSV)</button>
+  <button class="tabbtn" data-tab="batch">Quote list (batch)</button>
   <button class="tabbtn" data-tab="resources">Dimension &amp; assembly information</button>
 </nav>
 
@@ -259,12 +294,12 @@
       <div class="panel">
         <h2>Window box</h2>
         <p style="margin:2px 0 8px;font-size:11px;color:var(--muted)">Window frame = box + 40mm</p>
-        <label class="fld">Width <span style="font-weight:400;color:var(--muted)">(mm)</span>
-          <input type="number" id="W" value="600" /></label>
-        <div class="err" id="errW"></div>
         <label class="fld">Height <span style="font-weight:400;color:var(--muted)">(mm)</span>
           <input type="number" id="H" value="600" /></label>
         <div class="err" id="errH"></div>
+        <label class="fld">Width <span style="font-weight:400;color:var(--muted)">(mm)</span>
+          <input type="number" id="W" value="600" /></label>
+        <div class="err" id="errW"></div>
         <label class="fld">Box Fin Width <span style="font-weight:400;color:var(--muted)">(mm)</span>
           <select id="depth">
             <option value="100">100 mm</option>
@@ -345,23 +380,46 @@
 
   <div id="batchView" style="display:none">
     <div class="col">
-      <div class="panel no-print">
-        <h2>Batch from CSV</h2>
-        <p style="margin:0 0 12px;font-size:13px;color:#475569">Upload a CSV with columns for <b>window number</b>, <b>box width</b> and <b>box height</b> (mm). Header names are matched loosely (e.g. <code>no, width, height</code>). The current depth, advanced rules and prices are used.</p>
-        <div id="dropzone" class="dropzone">
-          <p style="margin:0 0 6px;font-weight:600">Drop a CSV here, or click to choose a file</p>
-          <p style="margin:0;font-size:12px">Example row: <code>W1, 600, 600</code></p>
+      <div class="panel" id="quotePanel">
+        <div class="qhead">
+          <div>
+            <h2 style="margin-bottom:2px">Quote list</h2>
+            <p class="qmeta" id="quoteMeta"></p>
+          </div>
+          <label class="qjob">Job / customer
+            <input type="text" id="jobName" placeholder="e.g. Smith St - 20 eyebrows" /><span class="print-only" id="jobNamePrint"></span>
+          </label>
+        </div>
+        <table class="qtable">
+          <thead><tr><th style="width:36px">#</th><th>Ref</th><th class="num">Height (mm)</th><th class="num">Width (mm)</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Line total</th><th class="no-print"></th></tr></thead>
+          <tbody id="quoteRows"></tbody>
+        </table>
+        <div class="btns no-print">
+          <button class="act primary" onclick="addQuoteLine()">+ Add window</button>
+          <button class="act" onclick="document.getElementById('fileInput').click()">Import CSV</button>
+          <button class="act" onclick="downloadTemplate()">Download CSV template</button>
+          <button class="act" id="btnClear" onclick="clearQuote()">Clear list</button>
+        </div>
+        <div id="dropzone" class="dropzone no-print">
+          Or drop a CSV here - columns <code>window, height, width, qty</code> (qty optional, header names matched loosely).
           <input id="fileInput" type="file" accept=".csv,text/csv" style="display:none" />
         </div>
-        <div class="btns">
-          <button class="act" onclick="downloadTemplate()">Download CSV template</button>
-          <button class="act" id="btnResults" onclick="exportBatchResults()" disabled>⬇ Export results CSV</button>
-          <button class="act" id="btnCombined" onclick="exportCombined()" disabled>⬇ Export combined order</button>
-          <button class="act primary" onclick="window.print()">🖨 Print</button>
+        <div class="qtotals">
+          <div class="qrow"><span>Windows</span><span id="qUnits">0</span></div>
+          <div class="qrow cost-only"><span>Cost subtotal</span><span id="qCost">-</span></div>
+          <div class="qrow cost-only"><label for="marginPct">Margin %</label>
+            <span class="qmargin"><input type="number" id="marginPct" min="0" max="99" step="0.5" /><span class="print-only" id="qMarginPrint"></span><span id="qMarginAmt">-</span></span></div>
+          <div class="qerr no-print" id="qMarginErr"></div>
+          <div class="qrow qgrand"><span>Quote total (excl. GST)</span><span id="qSell">-</span></div>
+          <p class="qnote no-print">Margin is on sell price: price = cost ÷ (1 − margin%). Unit prices include margin.</p>
+          <p class="qwarn" id="qWarn"></p>
         </div>
-        <p id="batchLoaded" style="margin-top:12px;font-size:13px;color:#475569"></p>
+        <div class="btns no-print">
+          <button class="act primary" id="btnPrintQuote" onclick="printMode('quote')">🖨 Print quote</button>
+          <button class="act" id="btnPrintCut" onclick="printMode('cut')">🖨 Print cut sheets</button>
+        </div>
       </div>
-      <div id="batchResults"></div>
+      <div id="batchResults" class="cutsheets"></div>
     </div>
   </div>
   <div id="resourcesView" class="reswrap" style="display:none">
@@ -1007,9 +1065,10 @@ function buildSingleCsv(model, costs, ctx) {
     lines.push(["Finish", `${name} (${ctx.finish})`]);
     lines.push([]);
   }
-  lines.push(["Window box", `${fmt(model.boxW)} x ${fmt(model.boxH)}`]);
-  lines.push(["Window frame", `${fmt(model.W)} x ${fmt(model.H)}`]);
-  lines.push(["Box fin", `${fmt(model.finW)} x ${fmt(model.finH)}`]);
+  // Joinery convention: height x width.
+  lines.push(["Window box", `${fmt(model.boxH)} x ${fmt(model.boxW)}`]);
+  lines.push(["Window frame", `${fmt(model.H)} x ${fmt(model.W)}`]);
+  lines.push(["Box fin", `${fmt(model.finH)} x ${fmt(model.finW)}`]);
   lines.push([]);
   lines.push(["Cut list"]);
   lines.push(["Part", "Code", "Length (mm)", "Qty", "Total (mm)"]);
@@ -1062,6 +1121,7 @@ const state = {
   screwPrices: { ...DEFAULT_SCREW_PRICES }, partPrices: { ...STANDARD_PART_PRICES }, labourRate: "",
   finish: DEFAULT_FINISH,
   colour: "",
+  quote: { lines: [], marginPct: 0, jobName: "" },
 };
 function load() {
   try {
@@ -1076,8 +1136,21 @@ function load() {
       labourRate: nn(s.labourRate, ""),
       finish: (s.finish && FINISHES.some((f) => f.code === s.finish)) ? s.finish : DEFAULT_FINISH,
       colour: typeof s.colour === "string" ? s.colour : "",
+      quote: loadQuote(s.quote),
     });
   } catch (e) { /* ignore */ }
+}
+// JSON turns NaN into null - restore blanks as NaN so validation flags them.
+function loadQuote(q) {
+  q = q || {};
+  const num = (v, d) => (typeof v === "number" ? v : d);
+  return {
+    lines: Array.isArray(q.lines)
+      ? q.lines.map((l) => newQuoteLine({ ref: typeof l.ref === "string" ? l.ref : "", h: num(l.h, NaN), w: num(l.w, NaN), qty: num(l.qty, 1) }))
+      : [],
+    marginPct: num(q.marginPct, 0),
+    jobName: typeof q.jobName === "string" ? q.jobName : "",
+  };
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
 
@@ -1187,7 +1260,7 @@ function render() {
   if (!valid) {
     lastModel = lastCosts = null;
     document.getElementById("cutlist").innerHTML =
-      `<p class="invalid">Enter valid dimensions (width 364–4930mm, height 160–4930mm).</p>`;
+      `<p class="invalid">Enter valid dimensions (height 160–4930mm, width 364–4930mm).</p>`;
     panels.forEach((p) => (document.getElementById(p).style.display = "none"));
     return;
   }
@@ -1230,7 +1303,7 @@ function renderCutList(model, costs, ctx) {
   const m = model;
   const finishName = (FINISHES.find((f) => f.code === state.finish) || {}).name || state.finish;
   const colourTxt = state.colour.trim();
-  const summary = `<p class="summary">Box <b>${fmt(m.boxW)} × ${fmt(m.boxH)}mm</b> · Frame <b>${fmt(m.W)} × ${fmt(m.H)}mm</b> · Box fin <b>${fmt(m.finW)} × ${fmt(m.finH)}mm</b> · Brackets <b>${m.brW}</b> top/bottom · <b>${m.brH}</b> each side · Total brackets <b>${m.brackets}</b> · Finish <b>${esc(finishName)}</b>${colourTxt ? ` · Colour <b>${esc(colourTxt)}</b>` : ""}.</p>`;
+  const summary = `<p class="summary">Box <b>${fmt(m.boxH)} × ${fmt(m.boxW)}mm</b> · Frame <b>${fmt(m.H)} × ${fmt(m.W)}mm</b> · Box fin <b>${fmt(m.finH)} × ${fmt(m.finW)}mm</b> · Brackets <b>${m.brW}</b> top/bottom · <b>${m.brH}</b> each side · Total brackets <b>${m.brackets}</b> · Finish <b>${esc(finishName)}</b>${colourTxt ? ` · Colour <b>${esc(colourTxt)}</b>` : ""}.</p>`;
 
   document.getElementById("cutlist").innerHTML = summary +
     `<table><thead><tr>
@@ -1400,7 +1473,7 @@ function downloadFile(name, text) {
 }
 function exportCsv() {
   if (!lastModel || !lastCosts) { alert("Enter valid dimensions first."); return; }
-  downloadFile(`eyebrow_${fmt(state.W)}x${fmt(state.H)}.csv`, buildSingleCsv(lastModel, lastCosts, buildCtx()));
+  downloadFile(`eyebrow_${fmt(state.H)}x${fmt(state.W)}.csv`, buildSingleCsv(lastModel, lastCosts, buildCtx()));
 }
 
 /* ---------- Batch CSV (csv.ts) ---------- */
@@ -1435,9 +1508,10 @@ function runBatch(text, depth, cfg, sc) {
   let map, dataStart;
   const first = rows[0];
   const firstNumeric = first.length >= 3 && looksNumeric(first[1]) && looksNumeric(first[2]);
-  if (firstNumeric) { map = { nI: 0, wI: 1, hI: 2 }; dataStart = 0; }
+  // Headerless / unrecognised columns: window, height, width (joinery order).
+  if (firstNumeric) { map = { nI: 0, hI: 1, wI: 2 }; dataStart = 0; }
   else { map = mapColumns(first); dataStart = 1; }
-  if (map.wI < 0 || map.hI < 0) { map.wI = 1; map.hI = 2; if (map.nI < 0) map.nI = 0; }
+  if (map.wI < 0 || map.hI < 0) { map.hI = 1; map.wI = 2; if (map.nI < 0) map.nI = 0; }
   const out = [];
   for (let i = dataStart; i < rows.length; i++) {
     const r = rows[i];
@@ -1445,7 +1519,7 @@ function runBatch(text, depth, cfg, sc) {
     const number = nCell && nCell.trim() ? nCell.trim() : "Row " + (i + 1);
     const W = parseFloat(nn(r[map.wI], "")), H = parseFloat(nn(r[map.hI], ""));
     if (!Number.isFinite(W) || !Number.isFinite(H) || W < 160 || H < 160 || W > 4930 || H > 4930)
-      out.push({ number, W, H, error: "Invalid dimensions (width 160–4930mm, height 160–4930mm)" });
+      out.push({ number, W, H, error: "Invalid dimensions (height 160–4930mm, width 160–4930mm)" });
     else out.push({ number, W, H, model: compute(W, H, depth, cfg, sc) });
   }
   return out;
@@ -1521,37 +1595,154 @@ function buildCombinedCsv(results, ctx) {
   return csvJoin(lines);
 }
 
-/* ---------- Batch rendering ---------- */
-const BATCH_TEMPLATE = "window,width,height\r\nW1,600,600\r\nW2,1200,900\r\nW3,1800,1200\r\n";
-let batchCsvText = "", batchData = [];
+/* ---------- Quote list / batch (quote.ts) ---------- */
+const BATCH_TEMPLATE = "window,height,width,qty\r\nW1,600,600,1\r\nW2,900,1200,5\r\nW3,1200,1800,2\r\n";
+const Q_MIN_H = 160, Q_MIN_W = 364, Q_MAX = 4930;
+let batchData = [];
 function batchDepth() { return Number.isFinite(state.depth) && state.depth >= 50 ? state.depth : 250; }
 
+function newQuoteLine(p) {
+  p = p || {};
+  return { id: Math.random().toString(36).slice(2, 10), ref: nn(p.ref, ""), h: nn(p.h, NaN), w: nn(p.w, NaN), qty: nn(p.qty, 1) };
+}
+function quoteLineError(l) {
+  if (!Number.isFinite(l.h) || l.h < Q_MIN_H || l.h > Q_MAX) return `Height must be ${Q_MIN_H}–${Q_MAX}mm`;
+  if (!Number.isFinite(l.w) || l.w < Q_MIN_W || l.w > Q_MAX) return `Width must be ${Q_MIN_W}–${Q_MAX}mm`;
+  if (!Number.isInteger(l.qty) || l.qty < 1) return "Quantity must be a whole number ≥ 1";
+  return "";
+}
+function priceQuoteLines(lines, depth, ctx) {
+  return lines.map((line) => {
+    const error = quoteLineError(line);
+    if (error) return { line, error, unitCost: null };
+    const model = compute(line.w, line.h, depth, state.config, state.screwCfg);
+    const costs = computeCosts(model, ctx);
+    return { line, model, costs, unitCost: costs.grandTotal };
+  });
+}
+// Gross margin (share of sell price): sell = cost / (1 - margin%). 25% on $75 sells at $100.
+function sellPrice(cost, marginPct) { return cost / (1 - marginPct / 100); }
+function validMargin(m) { return Number.isFinite(m) && m >= 0 && m < 100; }
+function quoteTotals(priced, marginPct) {
+  let units = 0, unpriced = 0, invalid = 0, cost = 0, anyCost = false;
+  for (const p of priced) {
+    if (p.error) { invalid++; continue; }
+    units += p.line.qty;
+    if (p.unitCost == null) { unpriced++; continue; }
+    cost += p.unitCost * p.line.qty; anyCost = true;
+  }
+  if (!anyCost) return { units, unpriced, invalid, cost: null, marginAmount: null, sell: null };
+  const sell = sellPrice(cost, validMargin(marginPct) ? marginPct : 0);
+  return { units, unpriced, invalid, cost, marginAmount: sell - cost, sell };
+}
+// One result per physical eyebrow so combined order / nesting / fasteners count every unit.
+function manufactureResults(priced) {
+  const out = [];
+  priced.forEach((p, i) => {
+    if (!p.model) return;
+    const ref = p.line.ref.trim() || `Line ${i + 1}`;
+    for (let n = 1; n <= p.line.qty; n++)
+      out.push({ number: p.line.qty > 1 ? `${ref} (${n} of ${p.line.qty})` : ref, W: p.line.w, H: p.line.h, model: p.model });
+  });
+  return out;
+}
+// Header names matched loosely (window / height / width / qty); headerless = window, height, width[, qty].
+function quoteLinesFromCsv(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) return [];
+  const looksNumeric = (s) => s != null && Number.isFinite(parseFloat(s));
+  const first = rows[0];
+  const headerless = first.length >= 3 && looksNumeric(first[1]) && looksNumeric(first[2]);
+  let nI = 0, hI = 1, wI = 2, qI = 3, start = 0;
+  if (!headerless) {
+    const map = mapColumns(first);
+    start = 1;
+    if (map.wI >= 0 && map.hI >= 0) {
+      nI = map.nI; hI = map.hI; wI = map.wI;
+      qI = first.findIndex((c) => /^(qty|quantity|count|no\.? off|units?)$/i.test(c.trim()));
+    }
+  }
+  return rows.slice(start).map((r, i) => {
+    const name = nI >= 0 ? nn(r[nI], "").trim() : "";
+    const qCell = qI >= 0 ? r[qI] : undefined;
+    return newQuoteLine({ ref: name || `W${i + 1}`, h: parseFloat(nn(r[hI], "")), w: parseFloat(nn(r[wI], "")),
+      qty: looksNumeric(qCell) ? parseFloat(qCell) : 1 });
+  });
+}
+
+/* Quote figures with thousands separators ($12,345.67). */
+function nzd(n) { return "$" + n.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+const numVal = (v) => (Number.isFinite(v) ? v : "");
+
+/* Rebuild the editable rows - only on add / delete / import / load, so typing never loses focus. */
+function buildQuoteRows() {
+  const lines = state.quote.lines;
+  document.getElementById("quoteRows").innerHTML = lines.length
+    ? lines.map((l, i) => `<tr data-id="${l.id}">
+        <td style="color:var(--muted)">${i + 1}</td>
+        <td><input type="text" data-q="ref" aria-label="Window reference" value="${esc(l.ref)}" /><div class="qline-err"></div></td>
+        <td class="num"><input type="number" class="qnum" data-q="h" aria-label="Height" value="${numVal(l.h)}" /></td>
+        <td class="num"><input type="number" class="qnum" data-q="w" aria-label="Width" value="${numVal(l.w)}" /></td>
+        <td class="num" style="width:90px"><input type="number" class="qnum" data-q="qty" min="1" aria-label="Quantity" value="${numVal(l.qty)}" /></td>
+        <td class="num qprice" data-cell="unit">-</td>
+        <td class="num qprice" data-cell="line" style="font-weight:600">-</td>
+        <td class="no-print"><button class="qdel" onclick="removeQuoteLine('${l.id}')">Delete</button></td>
+      </tr>`).join("")
+    : `<tr><td colspan="8" style="color:var(--muted)">No windows yet - add a line or import a CSV.</td></tr>`;
+  document.getElementById("btnClear").disabled = !lines.length;
+  renderBatch();
+}
+
+/* Recompute prices, totals and cut sheets without touching the inputs. */
 function renderBatch() {
   const ctx = buildCtx();
-  const results = batchCsvText ? runBatch(batchCsvText, batchDepth(), state.config, state.screwCfg) : [];
+  const q = state.quote;
+  const priced = priceQuoteLines(q.lines, batchDepth(), ctx);
+  const margin = validMargin(q.marginPct) ? q.marginPct : 0;
+  const t = quoteTotals(priced, margin);
+  const finishName = (FINISHES.find((f) => f.code === state.finish) || {}).name || state.finish;
+  const today = new Date().toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+  document.getElementById("quoteMeta").innerHTML =
+    `Box fin ${batchDepth()}mm · ${esc(finishName)}${state.colour.trim() ? " · " + esc(state.colour.trim()) : ""} · ${today}<span class="no-print"> - change these on the Single window tab.</span>`;
+
+  for (const p of priced) {
+    const tr = document.querySelector(`#quoteRows tr[data-id="${p.line.id}"]`);
+    if (!tr) continue;
+    const unit = p.unitCost != null ? sellPrice(p.unitCost, margin) : null;
+    tr.querySelector(".qline-err").textContent = p.error || "";
+    tr.querySelector('[data-cell="unit"]').textContent = unit != null ? nzd(unit) : "-";
+    tr.querySelector('[data-cell="line"]').textContent = unit != null && !p.error ? nzd(unit * p.line.qty) : "-";
+  }
+  document.getElementById("qUnits").textContent = t.units;
+  document.getElementById("qCost").textContent = t.cost != null ? nzd(t.cost) : "-";
+  document.getElementById("qMarginAmt").textContent = t.marginAmount != null ? nzd(t.marginAmount) : "-";
+  document.getElementById("qMarginPrint").textContent = fmt(margin) + "%";
+  document.getElementById("qMarginErr").textContent =
+    Number.isFinite(q.marginPct) && !validMargin(q.marginPct) ? "Margin must be 0–99% - using 0%." : "";
+  document.getElementById("qSell").textContent = t.sell != null ? nzd(t.sell) : "-";
+  document.getElementById("jobNamePrint").textContent = q.jobName;
+  document.getElementById("qWarn").textContent = [
+    t.unpriced ? `${t.unpriced} line(s) could not be priced.` : "",
+    t.invalid ? `${t.invalid} line(s) have invalid sizes and are excluded.` : "",
+  ].filter(Boolean).join(" ");
+
+  const results = manufactureResults(priced);
   batchData = results;
-  const validCount = results.filter((b) => !b.error).length;
-  document.getElementById("btnResults").disabled = !results.length;
-  document.getElementById("btnCombined").disabled = !results.length;
-  document.getElementById("batchLoaded").textContent = batchCsvText ? `Loaded ${results.length} row(s) - ${validCount} valid.` : "";
+  document.getElementById("btnPrintQuote").disabled = !results.length;
+  document.getElementById("btnPrintCut").disabled = !results.length;
 
   const host = document.getElementById("batchResults");
   if (!results.length) { host.innerHTML = ""; return; }
 
-  // Per-window summary
-  let grand = 0, anyCost = false, weightTotal = 0, anyWeight = false, sumRows = "";
-  for (const b of results) {
-    if (!b.model) {
-      sumRows += `<tr class="err-row"><td>${esc(b.number)}</td><td class="num">${Number.isFinite(b.W) ? b.W : ""}</td><td class="num">${Number.isFinite(b.H) ? b.H : ""}</td><td colspan="4">${esc(b.error || "error")}</td></tr>`;
-      continue;
-    }
-    const costs = computeCosts(b.model, ctx);
-    if (costs.grandTotal != null) { grand += costs.grandTotal; anyCost = true; }
-    if (costs.weightKg != null) { weightTotal += costs.weightKg; anyWeight = true; }
-    sumRows += `<tr><td>${esc(b.number)}</td><td class="num">${fmt(b.model.boxW)}</td><td class="num">${fmt(b.model.boxH)}</td><td class="num">${fmt(b.model.finW)}×${fmt(b.model.finH)}</td><td class="num">${b.model.brackets}</td><td class="num">${costs.grandTotal != null ? money(costs.grandTotal) : "-"}</td><td class="num">${costs.weightKg != null ? kg(costs.weightKg) : "-"}</td></tr>`;
-  }
-  const summaryFoot = (anyCost || anyWeight) ? `<tfoot><tr><td class="num" colspan="5">Total estimated cost (${validCount} windows)</td><td class="num">${anyCost ? money(grand) : "-"}</td><td class="num">${anyWeight ? kg(weightTotal) : "-"}</td></tr></tfoot>` : "";
-  const summaryPanel = `<div class="panel"><h2>Per-window summary</h2><table><thead><tr><th>Window</th><th class="num">Box W</th><th class="num">Box H</th><th class="num">Box fin W×H</th><th class="num">Brackets</th><th class="num">Est. cost</th><th class="num">Weight (kg)</th></tr></thead><tbody>${sumRows}</tbody>${summaryFoot}</table></div>`;
+  // Window schedule (one row per quote line)
+  let schedRows = "";
+  priced.forEach((p, i) => {
+    if (!p.model) return;
+    const m = p.model;
+    schedRows += `<tr><td>${esc(p.line.ref.trim() || `Line ${i + 1}`)}</td><td class="num">${p.line.qty}</td><td class="num">${fmt(m.boxH)}</td><td class="num">${fmt(m.boxW)}</td><td class="num">${fmt(m.finH)}×${fmt(m.finW)}</td><td class="num">${m.brackets}</td><td class="num">${p.costs.weightKg != null ? kg(p.costs.weightKg) : "-"}</td></tr>`;
+  });
+  const job = q.jobName.trim() ? ` · ${esc(q.jobName.trim())}` : "";
+  const schedPanel = `<div class="panel"><div class="qhead"><h2 style="margin:0">Cut sheets - window schedule${job}</h2><div class="btns no-print" style="margin:0"><button class="act" onclick="exportBatchResults()">⬇ Export results CSV</button><button class="act" onclick="exportCombined()">⬇ Export combined order</button></div></div><table><thead><tr><th>Window</th><th class="num">Qty</th><th class="num">Box H</th><th class="num">Box W</th><th class="num">Box fin H×W</th><th class="num">Brackets each</th><th class="num">Weight each</th></tr></thead><tbody>${schedRows}</tbody></table></div>`;
 
   // Combined order
   let combTotal = 0, anyComb = false, combWeight = 0, anyCombWeight = false, orderRows = "";
@@ -1565,7 +1756,7 @@ function renderBatch() {
     orderRows += `<tr><td>${esc(a.part)}</td><td class="mono">${codeSwatch(a.code, a.external)}${esc(a.code)}</td><td class="num">${a.qty}</td><td class="num">${(a.lenMm / 1000).toFixed(2)}</td><td class="num">${u != null ? u.toFixed(2) : "-"}</td><td class="num">${cost != null ? money(cost) : "-"}</td><td class="num">${w != null ? kg(w) : "-"}</td></tr>`;
   }
   const orderFoot = (anyComb || anyCombWeight) ? `<tfoot><tr><td class="num" colspan="5">Combined extrusion cost</td><td class="num">${anyComb ? money(combTotal) : "-"}</td><td class="num">${anyCombWeight ? kg(combWeight) : "-"}</td></tr></tfoot>` : "";
-  const orderPanel = `<div class="panel"><h2>Combined order (all windows)</h2><table><thead><tr><th>Part</th><th>Code</th><th class="num">Total qty</th><th class="num">Total length (m)</th><th class="num">$/m</th><th class="num">Cost</th><th class="num">Weight (kg)</th></tr></thead><tbody>${orderRows}</tbody>${orderFoot}</table></div>`;
+  const orderPanel = `<div class="panel"><h2>Combined order (${results.length} windows)</h2><table><thead><tr><th>Part</th><th>Code</th><th class="num">Total qty</th><th class="num">Total length (m)</th><th class="num">$/m</th><th class="num">Cost</th><th class="num">Weight (kg)</th></tr></thead><tbody>${orderRows}</tbody>${orderFoot}</table></div>`;
 
   // Combined optimised cut list
   const allRows = [].concat(...results.map((b) => (b.model ? b.model.rows : [])));
@@ -1582,8 +1773,29 @@ function renderBatch() {
   const scrFoot = anyScr ? `<tfoot><tr><td class="num" colspan="3">Combined fastener cost</td><td class="num">${money(scrTotal)}</td></tr></tfoot>` : "";
   const scrPanel = `<div class="panel"><h2>Combined fasteners (all windows)</h2><table><thead><tr><th>Screw type</th><th class="num">Total qty</th><th class="num">$ each</th><th class="num">Cost</th></tr></thead><tbody>${scrRows}</tbody>${scrFoot}</table></div>`;
 
-  host.innerHTML = summaryPanel + orderPanel + optPanel + scrPanel;
+  host.innerHTML = schedPanel + orderPanel + optPanel + scrPanel;
   wrapTables(host);
+}
+
+function addQuoteLine() {
+  const lines = state.quote.lines, last = lines[lines.length - 1];
+  lines.push(newQuoteLine({ ref: `W${lines.length + 1}`, h: last ? last.h : 600, w: last ? last.w : 600, qty: 1 }));
+  save(); buildQuoteRows();
+}
+function removeQuoteLine(id) {
+  state.quote.lines = state.quote.lines.filter((l) => l.id !== id);
+  save(); buildQuoteRows();
+}
+function clearQuote() {
+  if (!state.quote.lines.length || !confirm("Remove every line from the quote list?")) return;
+  state.quote.lines = []; save(); buildQuoteRows();
+}
+/* Print only the quote (no costs/margin, no cut sheets) or only the cut sheets. */
+function printMode(mode) {
+  document.body.classList.add("print-" + mode);
+  const done = () => document.body.classList.remove("print-quote", "print-cut");
+  window.addEventListener("afterprint", done, { once: true });
+  window.print();
 }
 
 function downloadTemplate() { downloadFile("eyebrow_template.csv", BATCH_TEMPLATE); }
@@ -1600,12 +1812,37 @@ function setTab(tab) {
 function buildBatch() {
   document.querySelectorAll(".tabbtn").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
   const dz = document.getElementById("dropzone"), fi = document.getElementById("fileInput");
-  const readCsv = (f) => { const r = new FileReader(); r.onload = () => { if (typeof r.result === "string") { batchCsvText = r.result; renderBatch(); } }; r.readAsText(f); };
-  dz.addEventListener("click", () => fi.click());
+  const readCsv = (f) => {
+    const r = new FileReader();
+    r.onload = () => {
+      if (typeof r.result !== "string") return;
+      const imported = quoteLinesFromCsv(r.result);
+      if (!imported.length) return;
+      const n = state.quote.lines.length;
+      if (n && !confirm(`Replace the ${n} line(s) in the list with ${imported.length} from the CSV?`)) return;
+      state.quote.lines = imported; save(); buildQuoteRows();
+    };
+    r.readAsText(f);
+  };
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
   dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("drag"); const f = e.dataTransfer.files[0]; if (f) readCsv(f); });
-  fi.addEventListener("change", (e) => { const f = e.target.files[0]; if (f) readCsv(f); });
+  fi.addEventListener("change", (e) => { const f = e.target.files[0]; if (f) readCsv(f); e.target.value = ""; });
+
+  // Row edits update state in place; the row inputs are never re-rendered while typing.
+  document.getElementById("quoteRows").addEventListener("input", (e) => {
+    const key = e.target.dataset.q, tr = e.target.closest("tr");
+    const line = tr && state.quote.lines.find((l) => l.id === tr.dataset.id);
+    if (!key || !line) return;
+    line[key] = key === "ref" ? e.target.value : parseFloat(e.target.value);
+    save(); renderBatch();
+  });
+  const marginEl = document.getElementById("marginPct"), jobEl = document.getElementById("jobName");
+  marginEl.value = numVal(state.quote.marginPct);
+  jobEl.value = state.quote.jobName;
+  marginEl.addEventListener("input", () => { state.quote.marginPct = parseFloat(marginEl.value); save(); renderBatch(); });
+  jobEl.addEventListener("input", () => { state.quote.jobName = jobEl.value; save(); renderBatch(); });
+  buildQuoteRows();
 }
 
 /* ---------- Wire up ---------- */
